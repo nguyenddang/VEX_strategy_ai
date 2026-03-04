@@ -108,6 +108,38 @@ class EnvRenderer:
             loader_lines.append((f"{loader_key}: {slot_signature}", (80, 80, 80)))
             loader_lines.append((f"  r/b: {red_count}/{blue_count}", (120, 120, 120)))
 
+        manager_lines = []
+        manager_entries = {}
+        for loader in field_dict.get("loaders", []):
+            manager = getattr(loader, "manager", None)
+            if manager is None:
+                continue
+            manager_id = id(manager)
+            goal_key = str(getattr(loader, "goal_key", ""))
+            loader_suffix = goal_key.split("_")[-1] if "_" in goal_key else "?"
+            if manager_id not in manager_entries:
+                manager_entries[manager_id] = {
+                    "manager": manager,
+                    "loader_suffixes": [],
+                }
+            manager_entries[manager_id]["loader_suffixes"].append(loader_suffix)
+
+        for entry in manager_entries.values():
+            manager = entry["manager"]
+            raw_suffixes = entry["loader_suffixes"]
+            if all(suffix.isdigit() for suffix in raw_suffixes):
+                sorted_suffixes = [str(value) for value in sorted({int(suffix) for suffix in raw_suffixes})]
+            else:
+                sorted_suffixes = sorted(set(raw_suffixes))
+
+            manager_colour = getattr(manager, "colour", None)
+            left_to_load = getattr(manager, "left_to_load", len(getattr(manager, "inventory", [])))
+            manager_name = f"LM{''.join(sorted_suffixes)}" if len(sorted_suffixes) > 0 else "LM?"
+            if manager_colour in ("red", "blue"):
+                manager_name += f" ({manager_colour})"
+            line_colour = TEAM_COLOURS.get(manager_colour, (80, 80, 80))
+            manager_lines.append((f"{manager_name}: {left_to_load} left", line_colour))
+
         lines = [
             ("Inventory", (30, 30, 30)),
             ("", (30, 30, 30)),
@@ -124,6 +156,11 @@ class EnvRenderer:
             lines.append(("", (30, 30, 30)))
             lines.append(("Loaders", (30, 30, 30)))
             lines.extend(loader_lines)
+
+        if len(manager_lines) > 0:
+            lines.append(("", (30, 30, 30)))
+            lines.append(("Loader Managers", (30, 30, 30)))
+            lines.extend(manager_lines)
 
         y = 20
         for text, color in lines:

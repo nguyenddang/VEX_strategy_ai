@@ -77,10 +77,12 @@ class VexEnv:
 
     def _build_world(self) -> None:
         self.space = create_space()
-        loader_1 = Loader(self.space, position=LOADER_1_POSITION, goal_key="loader_1", initial_ball_codes=INITIAL_LOADERS_BALLS[0])
-        loader_2 = Loader(self.space, position=LOADER_2_POSITION, goal_key="loader_2", initial_ball_codes=INITIAL_LOADERS_BALLS[1])
-        loader_3 = Loader(self.space, position=LOADER_3_POSITION, goal_key="loader_3", initial_ball_codes=INITIAL_LOADERS_BALLS[2])
-        loader_4 = Loader(self.space, position=LOADER_4_POSITION, goal_key="loader_4", initial_ball_codes=INITIAL_LOADERS_BALLS[3])
+        loader_manager12 = Loader_Manager(self.space, colour="red")
+        loader_manager34 = Loader_Manager(self.space, colour="blue")
+        loader_1 = Loader(self.space, position=LOADER_1_POSITION, goal_key="loader_1", initial_ball_codes=INITIAL_LOADERS_BALLS[0], manager=loader_manager12)
+        loader_2 = Loader(self.space, position=LOADER_2_POSITION, goal_key="loader_2", initial_ball_codes=INITIAL_LOADERS_BALLS[1], manager=loader_manager12)
+        loader_3 = Loader(self.space, position=LOADER_3_POSITION, goal_key="loader_3", initial_ball_codes=INITIAL_LOADERS_BALLS[2], manager=loader_manager34)
+        loader_4 = Loader(self.space, position=LOADER_4_POSITION, goal_key="loader_4", initial_ball_codes=INITIAL_LOADERS_BALLS[3], manager=loader_manager34)
         loader_list = [loader_1, loader_2, loader_3, loader_4]
 
         loader_balls = []
@@ -94,6 +96,22 @@ class VexEnv:
             Ball(self.space, position=position, colour="blue")
             for position in INITIAL_BALL_POSITIONS_CM["blue"]
         ]
+
+        red_robot = Robot(
+            self.space,
+            position=INITIAL_RED_ROBOT_POSITION_CM,
+            angle=math.radians(INITAL_RED_ROBOT_ANGLE_DEG),
+            colour="red",
+            capacity=self.config.robot_capacity,
+        )
+        blue_robot = Robot(
+            self.space,
+            position=INITIAL_BLUE_ROBOT_POSITION_CM,
+            angle=math.radians(INITAL_BLUE_ROBOT_ANGLE_DEG),
+            colour="blue",
+            capacity=self.config.robot_capacity,
+        )
+        tracked_balls = ground_balls + loader_balls + red_robot.inventory + blue_robot.inventory + loader_manager12.inventory + loader_manager34.inventory
 
         self.field_dict = {
             "wall": Wall(self.space),
@@ -112,9 +130,9 @@ class VexEnv:
             "LD3": loader_3,
             "LD4": loader_4,
             "loaders": loader_list,
-            "red_robot": Robot(self.space, position=INITIAL_RED_ROBOT_POSITION_CM, angle=math.radians(INITAL_RED_ROBOT_ANGLE_DEG), colour="red", capacity=self.config.robot_capacity),
-            "blue_robot": Robot(self.space, position=INITIAL_BLUE_ROBOT_POSITION_CM, angle=math.radians(INITAL_BLUE_ROBOT_ANGLE_DEG), colour="blue", capacity=self.config.robot_capacity),
-            "balls": ground_balls + loader_balls,
+            "red_robot": red_robot,
+            "blue_robot": blue_robot,
+            "balls": tracked_balls,
         }
 
     def reset(self) -> Dict[str, Any]:
@@ -179,9 +197,16 @@ class VexEnv:
         for player in ["red", "blue"]:
             robot = self.field_dict[f"{player}_robot"]
             robot.clear_action_attempt()
+        self._sync_inventory_ball_positions()
         self._update_ball_relative_states()
         legal_actions = self.get_legal_actions()
         return {'legal_actions': legal_actions} # TODO: also return observation and reward
+
+    def _sync_inventory_ball_positions(self):
+        for player in ["red", "blue"]:
+            robot = self.field_dict[f"{player}_robot"]
+            for ball in robot.inventory:
+                ball.body.position = robot.body.position
 
     def _update_ball_relative_states(self):
         """Update all balls' relative states to both robot and check if can be picked up.
@@ -336,7 +361,7 @@ class VexEnv:
 
 import time 
 if __name__ == "__main__":
-    env = VexEnv(Config(render_mode='human', engine_hz=60.0, env_hz=5.0, max_duration_s=120.0))
+    env = VexEnv(Config(render_mode=None, engine_hz=50.0, env_hz=5.0, max_duration_s=120.0))
     start_time = time.time()
     for i in range(1):
         env.reset()

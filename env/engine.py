@@ -132,7 +132,14 @@ class Robot:
         
         self.move_target_pos = None # store target position
         self.move_target_angle = None # store target angle in radians
-        self.inventory = [Ball(space=space, position=position, colour=colour, state='robot_red' if colour == 'red' else 'robot_blue', add_sim=False) for _ in range(2)]  # list of balls currently held by the robot, used for scoring. Balls that are in inventory has the same position as robot.
+        self.inventory = [
+            Ball(space=space, 
+                 position=position, 
+                 colour=colour, 
+                 state='robot_red' if colour == 'red' else 'robot_blue', 
+                 add_sim=False) 
+            for _ in range(2)]  # list of balls currently held by the robot, used for scoring. Balls that are in inventory has the same position as robot.
+        
         self.capacity = capacity # maximum number of balls the robot can hold. reinforced by env.py
         self._pickup_ball = None # potential ball to be picked up. Only one ball can be picked up at a time.
         self._pickup_phase = None # 'align' or 'charge' or None.
@@ -321,7 +328,6 @@ class Robot:
 
         goal = None
         entry_side = None
-        opponent_robot = None
         loader = None
 
         if self._building_action_mode == "loader":
@@ -424,10 +430,6 @@ class Robot:
         distance, angle_error = self._apply_motion(self.move_target_pos, self.move_target_angle)
         if distance <= ROBOT_ARRIVAL_EPSILON and angle_error <= ROBOT_HEADING_EPSILON:
             self.stop()
-            
-        for ball in self.inventory:
-            # if ball is in inventory, update its position to match robot's position. Observation convenience.
-            ball.body.position = self.body.position
         
 class Ball:
     def __init__(self, space, position, colour="red", state="ground", add_sim=True):
@@ -605,8 +607,7 @@ class Goal:
             ejected_ball.body.position = (self.body.position.x + out_x * eject_distance, self.body.position.y + out_y * eject_distance)
             ejected_ball.body.velocity = (0, 0)
             ejected_ball.body.angular_velocity = 0
-            if ejected_ball.shape.space is None:
-                goal_space.add(ejected_ball.body, ejected_ball.shape)
+            goal_space.add(ejected_ball.body, ejected_ball.shape)
 
         if GOAL_SLOT_DEBUG:
             goal_name = getattr(self, "goal_key", self.__class__.__name__)
@@ -662,7 +663,7 @@ class Goal:
 
 
 class Loader:
-    def __init__(self, space, position, goal_key: str, initial_ball_codes=None):
+    def __init__(self, space, position, goal_key: str, initial_ball_codes=None, manager=None):
         assert initial_ball_codes is not None, 'Loader should be initialized with initial_ball_codes for pre-population.'
         self.body = pymunk.Body(body_type=pymunk.Body.STATIC)
         self.body.position = position
@@ -683,6 +684,7 @@ class Loader:
         space.add(self.body, self.shape)
         if initial_ball_codes is not None:
             self.prepopulate_balls(initial_ball_codes)
+        self.manager = manager # reference to Loader_Manager for refilling after pickup.
 
     def prepopulate_balls(self, color_codes):
         """ Pre-populate balls before match starts.
@@ -727,7 +729,33 @@ class Loader:
             picked_ball.body.velocity = (0, 0)
             picked_ball.body.angular_velocity = 0
             self.body.space.add(picked_ball.body, picked_ball.shape)
-            return None
+        # request manager to refill 
+        self.manager.fill(self)
+class Loader_Manager:
+    
+    def __init__(self, space, colour):
+        self.left_to_load = 12
+        self.inventory = [Ball(
+            space=space,
+            position=(-1, -1),
+            colour=colour,
+            state='N/A',
+            add_sim=False
+        ) for _ in range(self.left_to_load)]
+        self.colour = colour
+        
+    def fill(self, loader):
+        if self.left_to_load <= 0:
+            return
+        fill_ball = self.inventory.pop(0)
+        fill_ball.state = loader.goal_key
+        fill_ball.body.position = loader.body.position
+        fill_ball.body.velocity = (0, 0)
+        fill_ball.body.angular_velocity = 0
+        loader.scored_balls[-1] = fill_ball
+        self.left_to_load -= 1
+        print(f"[LOADER_MANAGER] Filled loader {loader.goal_key} with a {fill_ball.colour} ball. Balls left to load: {self.left_to_load}")
+        
 
 
 class Leg:
