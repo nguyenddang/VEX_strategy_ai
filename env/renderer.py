@@ -1,0 +1,230 @@
+import pygame
+import pymunk
+import math
+
+try:
+    from engine import FIELD_WIDTH, FIELD_HEIGHT, ROBOT_SIZE, BALL_RADIUS, Ball
+except ImportError:
+    from env.engine import FIELD_WIDTH, FIELD_HEIGHT, ROBOT_SIZE, BALL_RADIUS, Ball
+
+
+INCH_TO_CM = 2.54
+GRID_SPACING_INCH = 3.23
+SHOW_REGION = True
+GOAL_FILL_ALPHA = 95
+GOAL_BORDER_ALPHA = 180
+SCORED_BALL_ALPHA = 150
+
+
+class EnvRenderer:
+    def __init__(
+        self,
+        window_width: int = 1200,
+        window_height: int = 1200,
+        pickup_dist_threshold: float = ROBOT_SIZE * 1.5,
+        pickup_angle_threshold_deg: float = 45.0,
+        goal_dist_threshold: float = ROBOT_SIZE / 2,
+        goal_angle_threshold_deg: float = 45.0,
+    ):
+        pygame.init()
+        self.field_view_width = window_width
+        self.window_height = window_height
+        self.info_panel_width = max(220, int(self.field_view_width * 0.22))
+        self.window_width = self.field_view_width + self.info_panel_width
+        self.scale_x = self.field_view_width / FIELD_WIDTH
+        self.scale_y = self.window_height / FIELD_HEIGHT
+        self.pickup_dist_threshold = pickup_dist_threshold
+        self.pickup_angle_threshold_rad = math.radians(pickup_angle_threshold_deg)
+        self.goal_dist_threshold = goal_dist_threshold
+        self.goal_angle_threshold_rad = math.radians(goal_angle_threshold_deg)
+        self.screen = pygame.display.set_mode((self.window_width, self.window_height))
+        self.font = pygame.font.SysFont("consolas", 20)
+        pygame.display.set_caption("Vex RL Env")
+
+    def _world_to_screen(self, point):
+        return (
+            int(point[0] * self.scale_x),
+            int(self.window_height - point[1] * self.scale_y),
+        )
+
+    def _draw_grid(self):
+        step = GRID_SPACING_INCH * INCH_TO_CM
+
+        x = 0.0
+        while x <= FIELD_WIDTH:
+            x_screen = int(x * self.scale_x)
+            pygame.draw.line(self.screen, (195, 195, 195), (x_screen, 0), (x_screen, self.window_height), 1)
+            x += step
+
+        y = 0.0
+        while y <= FIELD_HEIGHT:
+            y_screen = int(self.window_height - y * self.scale_y)
+            pygame.draw.line(self.screen, (195, 195, 195), (0, y_screen), (self.field_view_width, y_screen), 1)
+            y += step
+
+    def _draw_info_panel(self, field_dict):
+        panel_x = self.field_view_width
+        panel_rect = pygame.Rect(panel_x, 0, self.info_panel_width, self.window_height)
+        pygame.draw.rect(self.screen, (235, 235, 235), panel_rect)
+        pygame.draw.line(self.screen, (120, 120, 120), (panel_x, 0), (panel_x, self.window_height), 2)
+
+        red_inv = field_dict["red_robot"].inventory
+        blue_inv = field_dict["blue_robot"].inventory
+        red_red = sum(1 for ball in red_inv if getattr(ball, "color_key", None) == "red")
+        red_blue = sum(1 for ball in red_inv if getattr(ball, "color_key", None) == "blue")
+        blue_red = sum(1 for ball in blue_inv if getattr(ball, "color_key", None) == "red")
+        blue_blue = sum(1 for ball in blue_inv if getattr(ball, "color_key", None) == "blue")
+
+        lines = [
+            ("Inventory", (30, 30, 30)),
+            ("", (30, 30, 30)),
+            (f"Red: {len(red_inv)}", (220, 40, 40)),
+            (f"  red balls:  {red_red}", (80, 80, 80)),
+            (f"  blue balls: {red_blue}", (80, 80, 80)),
+            ("", (30, 30, 30)),
+            (f"Blue: {len(blue_inv)}", (40, 80, 220)),
+            (f"  red balls:  {blue_red}", (80, 80, 80)),
+            (f"  blue balls: {blue_blue}", (80, 80, 80)),
+        ]
+
+        y = 20
+        for text, color in lines:
+            if text == "":
+                y += 12
+                continue
+            surface = self.font.render(text, True, color)
+            self.screen.blit(surface, (panel_x + 14, y))
+            y += 26
+
+    def _draw_wall(self, wall):
+        for segment in wall.shapes:
+            a = segment.a.rotated(segment.body.angle) + segment.body.position
+            b = segment.b.rotated(segment.body.angle) + segment.body.position
+            a_screen = self._world_to_screen((a.x, a.y))
+            b_screen = self._world_to_screen((b.x, b.y))
+            width = max(1, int(segment.radius * 2 * self.scale_x))
+            pygame.draw.line(self.screen, (60, 60, 60), a_screen, b_screen, width)
+
+    def _draw_goal(self, goal):
+        points_world = [p.rotated(goal.body.angle) + goal.body.position for p in goal.shape.get_vertices()]
+        points_screen = [self._world_to_screen((p.x, p.y)) for p in points_world]
+        overlay = pygame.Surface((self.window_width, self.window_height), pygame.SRCALPHA)
+        pygame.draw.polygon(overlay, (*goal.color, GOAL_FILL_ALPHA), points_screen)
+        pygame.draw.polygon(overlay, (*goal.color, GOAL_BORDER_ALPHA), points_screen, 2)
+        self.screen.blit(overlay, (0, 0))
+
+    def _draw_scored_balls(self, goal):
+        if not hasattr(goal, "scored_balls"):
+            return
+
+        radius_px = max(2, int(BALL_RADIUS * 0.7 * self.scale_x))
+        team_colors = {
+            "red": (220, 40, 40),
+            "blue": (40, 80, 220),
+        }
+
+        for scored_ball in goal.scored_balls:
+            if scored_ball is None:
+                continue
+            center = self._world_to_screen((scored_ball.body.position.x, scored_ball.body.position.y))
+            if hasattr(scored_ball, "color_key"):
+                color = team_colors.get(scored_ball.color_key, (30, 30, 30))
+            else:
+                color = team_colors.get(scored_ball, (30, 30, 30))
+            overlay = pygame.Surface((self.window_width, self.window_height), pygame.SRCALPHA)
+            pygame.draw.circle(overlay, (*color, SCORED_BALL_ALPHA), center, radius_px)
+            pygame.draw.circle(overlay, (0, 0, 0, 160), center, radius_px, 1)
+            self.screen.blit(overlay, (0, 0))
+
+    def _draw_ball(self, ball):
+        center = self._world_to_screen((ball.body.position.x, ball.body.position.y))
+        pygame.draw.circle(self.screen, ball.color, center, max(1, int(BALL_RADIUS * self.scale_x)))
+
+    def _draw_robot(self, robot, body_color):
+        body_points_world = [p.rotated(robot.body.angle) + robot.body.position for p in robot.shape.get_vertices()]
+        body_points_screen = [self._world_to_screen((p.x, p.y)) for p in body_points_world]
+        pygame.draw.polygon(self.screen, body_color, body_points_screen)
+
+        side = ROBOT_SIZE
+        cell_half = side / 6
+        front_center = pymunk.Vec2d(side / 3, 0)
+        front_tile_local = [
+            front_center + (-cell_half, -cell_half),
+            front_center + (cell_half, -cell_half),
+            front_center + (cell_half, cell_half),
+            front_center + (-cell_half, cell_half),
+        ]
+        front_tile_world = [p.rotated(robot.body.angle) + robot.body.position for p in front_tile_local]
+        front_tile_screen = [self._world_to_screen((p.x, p.y)) for p in front_tile_world]
+        pygame.draw.polygon(self.screen, (255, 200, 0), front_tile_screen)
+
+    def _draw_pickup_region(self, robot, color):
+        center = robot.body.position
+        heading = robot.body.angle
+        start_angle = heading - self.pickup_angle_threshold_rad
+        end_angle = heading + self.pickup_angle_threshold_rad
+
+        arc_points = [self._world_to_screen((center.x, center.y))]
+        arc_samples = 32
+        for i in range(arc_samples + 1):
+            t = i / arc_samples
+            a = start_angle + (end_angle - start_angle) * t
+            px = center.x + math.cos(a) * self.pickup_dist_threshold
+            py = center.y + math.sin(a) * self.pickup_dist_threshold
+            arc_points.append(self._world_to_screen((px, py)))
+
+        overlay = pygame.Surface((self.window_width, self.window_height), pygame.SRCALPHA)
+        pygame.draw.polygon(overlay, (*color, 60), arc_points)
+        pygame.draw.polygon(overlay, (*color, 150), arc_points, 2)
+        self.screen.blit(overlay, (0, 0))
+
+    def _draw_score_regions(self, field_dict):
+        goals = [field_dict["CGL"], field_dict["CGU"], field_dict["LG1"], field_dict["LG2"]]
+        radius_px = max(1, int(self.goal_dist_threshold * self.scale_x))
+        overlay = pygame.Surface((self.window_width, self.window_height), pygame.SRCALPHA)
+
+        for goal in goals:
+            for scoring_position in goal.scoring_position:
+                center = self._world_to_screen(scoring_position)
+                pygame.draw.circle(overlay, (30, 170, 60, 30), center, radius_px)
+                pygame.draw.circle(overlay, (30, 170, 60, 180), center, radius_px, 2)
+
+        self.screen.blit(overlay, (0, 0))
+
+    def render(self, field_dict):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return None
+
+        self.screen.fill((217, 217, 217))
+        self._draw_grid()
+        self._draw_wall(field_dict["wall"])
+
+        self._draw_goal(field_dict["CGL"])
+        self._draw_goal(field_dict["CGU"])
+        self._draw_goal(field_dict["LG1"])
+        self._draw_goal(field_dict["LG2"])
+        self._draw_scored_balls(field_dict["CGL"])
+        self._draw_scored_balls(field_dict["CGU"])
+        self._draw_scored_balls(field_dict["LG1"])
+        self._draw_scored_balls(field_dict["LG2"])
+
+        if SHOW_REGION:
+            self._draw_score_regions(field_dict)
+            self._draw_pickup_region(field_dict["red_robot"], (220, 40, 40))
+            self._draw_pickup_region(field_dict["blue_robot"], (40, 80, 220))
+
+        for ball in field_dict["balls"]:
+            if ball.state != Ball.STATE_GROUND:
+                continue
+            self._draw_ball(ball)
+
+        self._draw_robot(field_dict["red_robot"], (220, 40, 40))
+        self._draw_robot(field_dict["blue_robot"], (40, 80, 220))
+        self._draw_info_panel(field_dict)
+
+        pygame.display.update()
+        return None
+
+    def close(self):
+        pygame.quit()
