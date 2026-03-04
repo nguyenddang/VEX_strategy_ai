@@ -342,7 +342,7 @@ class VexEnv:
 
 import time 
 if __name__ == "__main__":
-    env = VexEnv(Config(render_mode='human', engine_hz=60.0, env_hz=5.0, max_duration_s=120.0))
+    env = VexEnv(Config(render_mode='human', engine_hz=50.0, env_hz=5.0, max_duration_s=120.0))
     env.reset()
     start_time = time.time()
     try:

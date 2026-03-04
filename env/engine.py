@@ -245,8 +245,9 @@ class Robot:
 
         - `align`: move to a standoff point behind the ball while facing it.
         - `charge`: if heading error is large, rotate in place; otherwise drive in.
-        - success: when center distance crosses the completion threshold, remove
-          ball from physics and append it to `inventory`.
+        - success: when center distance crosses the completion threshold AND
+          intake heading is aligned, remove ball from physics and append it
+          to `inventory`.
         """
         assert self._pickup_ball is not None and self._pickup_phase in ("align", "charge"), "Pickup phase should be 'align' or 'charge' when updating pickup."
         ball_x = self._pickup_ball.body.position.x
@@ -254,19 +255,6 @@ class Robot:
         dx = ball_x - self.body.position.x
         dy = ball_y - self.body.position.y
         center_distance = math.hypot(dx, dy)
-
-        if center_distance <= PICKUP_GROUND_COMPLETION_DIST:
-            # pickup successful: stop robot, remove from space, add to inventory.
-            picked_ball = self._pickup_ball
-            self.body.velocity = (0, 0)
-            self.body.angular_velocity = 0
-            picked_ball.state = Ball.STATE_ROBOT_RED if self.team == "red" else Ball.STATE_ROBOT_BLUE
-            self._set_ball_ghost(picked_ball, False)
-            self.space.remove(picked_ball.shape, picked_ball.body) # remove from sim.
-            self.inventory.append(picked_ball)
-            self._pickup_ball = None
-            self._pickup_phase = None
-            return True
 
         if center_distance > 1e-8:
             unit_x = dx / center_distance
@@ -280,6 +268,23 @@ class Robot:
         approach_distance = ROBOT_SIZE / 2 + 1.5 * BALL_RADIUS
         align_target = (ball_x - unit_x * approach_distance, ball_y - unit_y * approach_distance)
         heading_error = abs(self._normalize_angle(desired_heading - self.body.angle))
+
+        if (
+            center_distance <= PICKUP_GROUND_COMPLETION_DIST
+            and heading_error <= ROBOT_HEADING_EPSILON
+        ):
+            # pickup successful: stop robot, remove from space, add to inventory.
+            picked_ball = self._pickup_ball
+            self.body.velocity = (0, 0)
+            self.body.angular_velocity = 0
+            picked_ball.state = Ball.STATE_ROBOT_RED if self.team == "red" else Ball.STATE_ROBOT_BLUE
+            self._set_ball_ghost(picked_ball, False)
+            self.space.remove(picked_ball.shape, picked_ball.body) # remove from sim.
+            self.inventory.append(picked_ball)
+            self._pickup_ball = None
+            self._pickup_phase = None
+            return True
+
         # aligning phase.
         if self._pickup_phase == "align":
             align_distance, align_angle_error = self._apply_motion(align_target, desired_heading)
@@ -308,13 +313,33 @@ class Robot:
         - `line_up`: move onto the goal centerline that passes through scoring point.
         - `face_goal`: rotate in place to match scoring heading.
         - `charge`: drive to scoring point while maintaining heading.
+        - success: requires arriving at target pose (distance + heading + lateral alignment).
         """
         active_target = self._goal_score_target if self._goal_action_mode == "score" else self._goal_block_target
         target_pos, target_heading, goal, entry_side, opponent_robot = active_target
         dx = target_pos[0] - self.body.position.x
         dy = target_pos[1] - self.body.position.y
         center_distance = math.hypot(dx, dy)
-        if center_distance <= ROBOT_ARRIVAL_EPSILON:
+        heading_error = abs(self._normalize_angle(target_heading - self.body.angle))
+        goal_dir_x = math.cos(target_heading)
+        goal_dir_y = math.sin(target_heading)
+        line_normal_x = -goal_dir_y
+        line_normal_y = goal_dir_x
+
+        rel_x = self.body.position.x - target_pos[0]
+        rel_y = self.body.position.y - target_pos[1]
+        lateral_error = rel_x * line_normal_x + rel_y * line_normal_y
+        line_up_target = (
+            self.body.position.x - lateral_error * line_normal_x,
+            self.body.position.y - lateral_error * line_normal_y,
+        )
+        line_up_tolerance = ROBOT_ARRIVAL_EPSILON
+
+        if (
+            center_distance <= ROBOT_ARRIVAL_EPSILON
+            and abs(lateral_error) <= line_up_tolerance
+            and heading_error <= ROBOT_HEADING_EPSILON
+        ):
             self.body.velocity = (0, 0)
             self.body.angular_velocity = 0
             self._goal_action_phase = None
@@ -338,21 +363,6 @@ class Robot:
 
             self._goal_action_mode = None
             return True
-
-        heading_error = abs(self._normalize_angle(target_heading - self.body.angle))
-        goal_dir_x = math.cos(target_heading)
-        goal_dir_y = math.sin(target_heading)
-        line_normal_x = -goal_dir_y
-        line_normal_y = goal_dir_x
-
-        rel_x = self.body.position.x - target_pos[0]
-        rel_y = self.body.position.y - target_pos[1]
-        lateral_error = rel_x * line_normal_x + rel_y * line_normal_y
-        line_up_target = (
-            self.body.position.x - lateral_error * line_normal_x,
-            self.body.position.y - lateral_error * line_normal_y,
-        )
-        line_up_tolerance = ROBOT_ARRIVAL_EPSILON
 
         if self._goal_action_phase == "line_up":
             self._apply_motion(line_up_target, self.body.angle)
@@ -650,7 +660,7 @@ class CenterGoalUpper(Goal):
             ),
         ]
         self.goal_key = "center_upper"
-        self.score_side = [1, 0]
+        self.score_side = [0, 1]
 
 
 class LongGoal(Goal):
