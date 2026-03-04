@@ -1,6 +1,7 @@
 import pymunk
 import math
 import random
+import os
 
 
 FIELD_WIDTH_INCH = 140.43
@@ -34,6 +35,7 @@ PICKUP_GROUND_COMPLETION_DIST = ROBOT_SIZE / 2 + BALL_RADIUS * (2.0 / 3.0) # "in
 ROBOT_ARRIVAL_EPSILON = 2.0 # cm
 ROBOT_HEADING_EPSILON = math.radians(5.0) # radians
 GOAL_BLOCK_EPSILON_CM = ROBOT_ARRIVAL_EPSILON
+GOAL_SLOT_DEBUG = "1"
 INITIAL_RED_ROBOT_POSITION = (30, 70.2) # in inch 
 INITIAL_BLUE_ROBOT_POSITION = (110, 70.2) # in inch
 INITAL_RED_ROBOT_ANGLE_DEG = 0.0
@@ -284,7 +286,6 @@ class Robot:
             self._pickup_ball = None
             self._pickup_phase = None
             return True
-
         # aligning phase.
         if self._pickup_phase == "align":
             align_distance, align_angle_error = self._apply_motion(align_target, desired_heading)
@@ -294,21 +295,19 @@ class Robot:
             ):
                 self._pickup_phase = "charge"
             return False
-
-        # Charge phase.
         if center_distance > approach_distance + ROBOT_ARRIVAL_EPSILON:
+            # if too far go back to aligning. (this can happen if opponent bumped us out of the way)
             self._pickup_phase = "align"
             return False
-
         if heading_error > ROBOT_HEADING_EPSILON:
+            # keep alinging. 
             self._pickup_phase = "align"
             return False
-
         self._apply_motion((ball_x, ball_y), desired_heading)
         return False
 
     def _update_goal_action(self):
-        """Scoring state machine (`line_up` -> `face_goal` -> `charge` -> success).
+        """Goal action state machine (`line_up` -> `face_goal` -> `charge` -> success).
 
         - `line_up`: move onto the goal centerline that passes through scoring point.
         - `face_goal`: rotate in place to match scoring heading.
@@ -360,16 +359,13 @@ class Robot:
                     self.inventory.pop(selected_index)
                     return True
                 return False
-
             self._goal_action_mode = None
             return True
-
         if self._goal_action_phase == "line_up":
             self._apply_motion(line_up_target, self.body.angle)
             if abs(lateral_error) <= line_up_tolerance:
                 self._goal_action_phase = "face_goal"
             return False
-
         if self._goal_action_phase == "face_goal":
             if abs(lateral_error) > line_up_tolerance:
                 self._goal_action_phase = "line_up"
@@ -378,11 +374,9 @@ class Robot:
             if heading_error <= ROBOT_HEADING_EPSILON:
                 self._goal_action_phase = "charge"
             return False
-
         if abs(lateral_error) > line_up_tolerance:
             self._goal_action_phase = "line_up"
             return False
-
         if heading_error > ROBOT_HEADING_EPSILON:
             self._goal_action_phase = "face_goal"
             return False
@@ -534,11 +528,6 @@ class Goal:
             self.body.position.y + axis_y * offset,
         )
 
-    def _entry_scan_indices(self, entry_side: int):
-        if entry_side == 0:
-            return range(self.capacity)
-        return range(self.capacity - 1, -1, -1)
-
     def _is_output_blocked(self, entry_side: int, blocker_pos):
         output_side = 1 if entry_side == 0 else 0
         output_pos = self.scoring_position[output_side]
@@ -551,46 +540,65 @@ class Goal:
             return True
         return not self._is_output_blocked(entry_side, blocker_pos)
 
-    def try_score(self, ball, entry_side: int, blocker_pos=None):
-        if self.is_full():
-            if entry_side == 0:
-                eject_indices = range(self.capacity - 1, -1, -1)
+    def _debug_slot_signature(self):
+        signature = []
+        for slot_ball in self.scored_balls:
+            if slot_ball is None:
+                signature.append("0")
+                continue
+            color_key = getattr(slot_ball, "color_key", None)
+            if color_key == "red":
+                signature.append("R")
+            elif color_key == "blue":
+                signature.append("B")
             else:
-                eject_indices = range(self.capacity)
+                signature.append("?")
+        return signature
 
-            ejected_slot = None
-            for idx in eject_indices:
-                if self.scored_balls[idx] is not None:
-                    ejected_slot = idx
-                    break
-
-            if ejected_slot is None:
-                return False
-
-            ejected_ball = self.scored_balls[ejected_slot]
-            self.scored_balls[ejected_slot] = None
-            if hasattr(ejected_ball, "state"):
-                ejected_ball.state = Ball.STATE_GROUND
-
-        insert_slot = None
-        for idx in self._entry_scan_indices(entry_side):
-            if self.scored_balls[idx] is None:
-                insert_slot = idx
-                break
-
-        if insert_slot is None:
-            return False
-
-        self.scored_balls[insert_slot] = ball
-
-        if hasattr(ball, "state"):
-            goal_to_state = {
+    def try_score(self, ball, entry_side: int, blocker_pos=None):
+        goal_to_state = {
                 "long_1": Ball.STATE_LONG_GOAL_1,
                 "long_2": Ball.STATE_LONG_GOAL_2,
                 "center_lower": Ball.STATE_CENTER_LOWER,
                 "center_upper": Ball.STATE_CENTER_UPPER,
-            }
-            ball.state = goal_to_state.get(getattr(self, "goal_key", None), Ball.STATE_GROUND)
+        }
+        side = 0 if entry_side == 0 else 1
+        goal_space = self.body.space
+        if not self.can_accept(entry_side=side, blocker_pos=blocker_pos):
+            return False
+
+        before_signature = self._debug_slot_signature() if GOAL_SLOT_DEBUG else None
+
+        # a new ball enters at the entry side and pushes existing balls toward the opposite side.
+        ejected_ball = None
+        def insert_from_left():
+            nonlocal ejected_ball
+            empty_slot = None
+            for idx in range(self.capacity):
+                if self.scored_balls[idx] is None:
+                    empty_slot = idx
+                    break
+            if empty_slot is None:
+                # no empty slot, the last ball will be ejected.
+                ejected_ball = self.scored_balls[self.capacity - 1]
+                for idx in range(self.capacity - 1, 0, -1):
+                    self.scored_balls[idx] = self.scored_balls[idx - 1]
+            else:
+                # shift balls to the right until the empty slot by 1.
+                for idx in range(empty_slot, 0, -1):
+                    self.scored_balls[idx] = self.scored_balls[idx - 1]
+
+            self.scored_balls[0] = ball
+            assert self.goal_key is not None, "Goal should have a goal_key attribute for ball state assignment."
+            ball.state = goal_to_state[self.goal_key]
+
+        if side == 0:
+            insert_from_left()
+        else:
+            # mirror slots so right-entry is equivalent to left-entry.
+            self.scored_balls.reverse()
+            insert_from_left()
+            self.scored_balls.reverse()
 
         for slot_idx, slot_ball in enumerate(self.scored_balls):
             if slot_ball is None:
@@ -599,6 +607,43 @@ class Goal:
             slot_ball.body.position = slot_pos
             slot_ball.body.velocity = (0, 0)
             slot_ball.body.angular_velocity = 0
+
+        if ejected_ball is not None:
+            ejected_ball.state = Ball.STATE_GROUND
+            output_side = 1 if side == 0 else 0
+            output_pos = self.scoring_position[output_side]
+            out_dx = output_pos[0] - self.body.position.x
+            out_dy = output_pos[1] - self.body.position.y
+            out_dist = math.hypot(out_dx, out_dy)
+            if out_dist > 1e-8:
+                out_x = out_dx / out_dist
+                out_y = out_dy / out_dist
+            else:
+                out_x = math.cos(self.body.angle)
+                out_y = math.sin(self.body.angle)
+
+            eject_distance = self.length / 2 + BALL_RADIUS * 1.25
+            ejected_ball.body.position = (
+                self.body.position.x + out_x * eject_distance,
+                self.body.position.y + out_y * eject_distance,
+            )
+            ejected_ball.body.velocity = (0, 0)
+            ejected_ball.body.angular_velocity = 0
+
+            if goal_space is not None and ejected_ball.shape.space is None:
+                goal_space.add(ejected_ball.body, ejected_ball.shape)
+
+        if GOAL_SLOT_DEBUG:
+            goal_name = getattr(self, "goal_key", self.__class__.__name__)
+            entry_name = "left" if side == 0 else "right"
+            incoming_color = getattr(ball, "color_key", "?")
+            ejected_color = getattr(ejected_ball, "color_key", None) if ejected_ball is not None else None
+            after_signature = self._debug_slot_signature()
+            print(
+                f"[GOAL_DEBUG] goal={goal_name} entry={entry_name} in={incoming_color} "
+                f"before={before_signature} after={after_signature} ejected={ejected_color}"
+            )
+
         return True
 
 

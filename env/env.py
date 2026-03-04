@@ -70,13 +70,13 @@ class Config:
     ball_pickup_hitbox: dict[str, float] = field(
         default_factory=lambda: {
             'dist_threshold': 40, # cm
-            'angle_threshold': math.radians(180), 
+            'angle_threshold': math.radians(90), 
         }
     ) # robot can pick up ball if satisfy distance and angle thesholds.
     goal_action_hitbox: dict[str, float] = field(
         default_factory=lambda: {
             'dist_threshold': ROBOT_SIZE,
-            'angle_threshold': math.radians(180),
+            'angle_threshold': math.radians(90),
         }
     ) # robot can score if satisfy distance and angle thesholds to the scoring position of the goal.
 
@@ -320,7 +320,7 @@ class VexEnv:
             can_score = score_target is not None
             can_block = block_target is not None
 
-            discrete_mask = [True, True, True, robot._pickup_ball is not None, can_score, can_block]
+            discrete_mask = [True, True, False, robot._pickup_ball is not None, can_score, can_block]
             legal_actions[player] = {
                 "discrete_mask": discrete_mask,
             }
@@ -352,12 +352,8 @@ if __name__ == "__main__":
             for player in ["red", "blue"]:
                 theta = random.uniform(-math.pi, math.pi)
                 possible_actions = [i for i in range(1, 6) if legal_actions[player]["discrete_mask"][i]]
-                if 3 in possible_actions:
-                    da = 3
-                elif 4 in possible_actions:
-                    da = 4
-                else:
-                    da = 1
+                da = random.choice(possible_actions) 
+                print(f"Player {player} takes action {da}")
                 action[player] = {
                     "discrete": da,
                     "continuous": [
