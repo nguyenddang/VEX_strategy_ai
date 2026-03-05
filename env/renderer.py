@@ -47,6 +47,8 @@ class EnvRenderer:
         self.screen = pygame.display.set_mode((self.window_width, self.window_height))
         self.font = pygame.font.SysFont("consolas", 20)
         self._static_field_surface = None
+        self._scored_balls_surface = None
+        self._scored_balls_signature = None
         pygame.display.set_caption("Vex RL Env")
 
     def _world_to_screen(self, point):
@@ -75,6 +77,14 @@ class EnvRenderer:
         panel_rect = pygame.Rect(panel_x, 0, self.info_panel_width, self.window_height)
         pygame.draw.rect(self.screen, (235, 235, 235), panel_rect)
         pygame.draw.line(self.screen, (120, 120, 120), (panel_x, 0), (panel_x, self.window_height), 2)
+
+        elapsed_time_s = float(field_dict.get("elapsed_time_s", 0.0))
+        max_duration_s = float(field_dict.get("max_duration_s", 0.0))
+
+        elapsed_int = max(0, int(elapsed_time_s))
+        max_int = max(0, int(max_duration_s))
+        elapsed_label = f"{elapsed_int // 60:02d}:{elapsed_int % 60:02d}"
+        max_label = f"{max_int // 60:02d}:{max_int % 60:02d}"
 
         red_inv = field_dict["red_robot"].inventory
         blue_inv = field_dict["blue_robot"].inventory
@@ -141,6 +151,8 @@ class EnvRenderer:
             manager_lines.append((f"{manager_name}: {left_to_load} left", line_colour))
 
         lines = [
+            (f"Time: {elapsed_label} / {max_label}", (30, 30, 30)),
+            ("", (30, 30, 30)),
             ("Inventory", (30, 30, 30)),
             ("", (30, 30, 30)),
             (f"Red: {len(red_inv)}", (220, 40, 40)),
@@ -211,7 +223,33 @@ class EnvRenderer:
 
         self._static_field_surface = static_surface
 
-    def _draw_scored_balls(self, goal):
+    def _get_scored_balls_signature(self, field_dict):
+        goals = [field_dict["CGL"], field_dict["CGU"], field_dict["LG1"], field_dict["LG2"]]
+        signature = []
+        for goal in goals:
+            goal_slots = []
+            for scored_ball in goal.scored_balls:
+                if scored_ball is None:
+                    goal_slots.append("0")
+                else:
+                    goal_slots.append(getattr(scored_ball, "colour", "?"))
+            signature.append(tuple(goal_slots))
+        return tuple(signature)
+
+    def _refresh_scored_balls_surface_if_needed(self, field_dict):
+        scored_signature = self._get_scored_balls_signature(field_dict)
+        if self._scored_balls_surface is not None and scored_signature == self._scored_balls_signature:
+            return
+
+        scored_surface = pygame.Surface((self.window_width, self.window_height), pygame.SRCALPHA)
+        self._draw_scored_balls(field_dict["CGL"], scored_surface)
+        self._draw_scored_balls(field_dict["CGU"], scored_surface)
+        self._draw_scored_balls(field_dict["LG1"], scored_surface)
+        self._draw_scored_balls(field_dict["LG2"], scored_surface)
+        self._scored_balls_surface = scored_surface
+        self._scored_balls_signature = scored_signature
+
+    def _draw_scored_balls(self, goal, target_surface):
         if not hasattr(goal, "scored_balls"):
             return
 
@@ -225,10 +263,8 @@ class EnvRenderer:
                 render_color = TEAM_COLOURS.get(scored_ball.colour, (30, 30, 30))
             else:
                 render_color = TEAM_COLOURS.get(scored_ball, (30, 30, 30))
-            overlay = pygame.Surface((self.window_width, self.window_height), pygame.SRCALPHA)
-            pygame.draw.circle(overlay, (*render_color, SCORED_BALL_ALPHA), center, radius_px)
-            pygame.draw.circle(overlay, (0, 0, 0, 160), center, radius_px, 1)
-            self.screen.blit(overlay, (0, 0))
+            pygame.draw.circle(target_surface, (*render_color, SCORED_BALL_ALPHA), center, radius_px)
+            pygame.draw.circle(target_surface, (0, 0, 0, 160), center, radius_px, 1)
 
     def _draw_ball(self, ball):
         center = self._world_to_screen((ball.body.position.x, ball.body.position.y))
@@ -306,10 +342,8 @@ class EnvRenderer:
             self._build_static_field_surface(field_dict)
 
         self.screen.blit(self._static_field_surface, (0, 0))
-        self._draw_scored_balls(field_dict["CGL"])
-        self._draw_scored_balls(field_dict["CGU"])
-        self._draw_scored_balls(field_dict["LG1"])
-        self._draw_scored_balls(field_dict["LG2"])
+        self._refresh_scored_balls_surface_if_needed(field_dict)
+        self.screen.blit(self._scored_balls_surface, (0, 0))
 
         if SHOW_REGION:
             self._draw_pickup_region(field_dict["red_robot"], (220, 40, 40))

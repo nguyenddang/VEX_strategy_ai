@@ -15,7 +15,7 @@ ROBOT_ANGULAR_VELOCITY = math.radians(360) # rad/s
 WALL_THICKNESS = 3.2258
 BALL_MASS_KG = 0.5 # 500 grams
 BALL_RADIUS = 4.1021 # cm
-BALL_LINEAR_DAMPING = 0.99
+BALL_LINEAR_DAMPING = 0.95
 BALL_ANGULAR_DAMPING = 0.99
 BALL_STOP_SPEED_CM_S = 1.0
 BALL_STOP_ANGULAR_DEG_S = 5.0
@@ -62,7 +62,8 @@ MID_POINT_X = 70.215 # inch
 MID_POINT_Y = 70.205 # inch
 for x, y in INITAL_BALL_POSITIONS['red']:
     INITAL_BALL_POSITIONS['blue'].append((2 * MID_POINT_X - x, 2 * MID_POINT_Y - y))
-
+for blue_ball in INITAL_BALL_POSITIONS['blue']:
+    assert blue_ball in INITAL_BALL_POSITIONS['blue'], "Blue ball positions should be flipped version of red ball positions."
 def _inches_to_cm_point(point):
     return (point[0] * INCH_TO_CM, point[1] * INCH_TO_CM)
 
@@ -660,6 +661,49 @@ class Goal:
                     self.body.position.y
                 )
             ]
+            
+    def get_game_score(self):
+        red_ball_count = 0
+        blue_ball_count = 0
+        for scored_ball in self.scored_balls:
+            if scored_ball is None:
+                continue
+            if scored_ball.colour == "red":
+                red_ball_count += 1
+            elif scored_ball.colour == "blue":
+                blue_ball_count += 1
+
+        red_score = red_ball_count * 3
+        blue_score = blue_ball_count * 3
+
+        if self.goal_key.startswith('long'):
+            red_control_count = 0
+            blue_control_count = 0
+            for control_index in (7, 8, 9):
+                control_ball = self.scored_balls[control_index]
+                if control_ball is None:
+                    continue
+                if control_ball.colour == "red":
+                    red_control_count += 1
+                elif control_ball.colour == "blue":
+                    blue_control_count += 1
+
+            if red_control_count > blue_control_count:
+                red_score += 10
+            elif blue_control_count > red_control_count:
+                blue_score += 10
+        elif self.goal_key == 'center_lower':
+            if red_ball_count > blue_ball_count:
+                red_score += 6
+            elif blue_ball_count > red_ball_count:
+                blue_score += 6
+        elif self.goal_key == 'center_upper':
+            if red_ball_count > blue_ball_count:
+                red_score += 8
+            elif blue_ball_count > red_ball_count:
+                blue_score += 8
+
+        return red_score, blue_score
 
 
 class Loader:

@@ -21,10 +21,12 @@ def _create_renderer(**kwargs):
 @dataclass
 class Config:
     engine_hz: float = 60.0
-    env_hz: float = 5.0
-    render_hz: float = 30.0
+    inference_hz: float = 5.0
+    render_hz: float = 60.0
     max_duration_s: float = 120.0
-    max_offset: float = 30.0 # in cm. max distance from current position for the MOVE action. This is used to scale the continuous action inputs.
+    max_offset: float = 30.0 # in cm. max relative MOVE extent in x/y from current robot position.
+    N: int = 31 # number of bins per axis for MOVE grid around robot.
+    K: int = 16 # number of bins for relative heading change in MOVE.
     render_mode: str | None = None
     window_width: int = 1200
     window_height: int = 1200
@@ -53,16 +55,16 @@ class VexEnv:
 
     def __init__(self, config: Config | None = None):
         self.config = config or Config()
-        self.engine_update_dt = 1.0 / self.config.engine_hz
-        self.model_query_dt = 1.0 / self.config.env_hz
-        self.render_update_dt = 1.0 / self.config.render_hz if self.config.render_hz > 0 else None
+        assert config.engine_hz >= config.inference_hz, "Engine update frequency should be higher than or equal to inference frequency"
+        assert config.engine_hz % config.inference_hz == 0, "Engine update frequency should be divisible by inference frequency"
+        self.n_engine_updates = int(config.engine_hz // config.inference_hz)
+        self.n_render_updates = int(config.engine_hz // config.render_hz)
+        self.max_actions = config.max_duration_s * config.inference_hz
+        self.engine_update_dt = 1.0 / config.engine_hz
+        self.action_count = 0
         self._build_world()
-        self.sim_time_s = 0.0
-        self.decision_elapsed_s = 0.0
-        self.render_elapsed_s = 0.0
-        self.done = False
         self.renderer = None
-        self.total_actions = 0
+        self.time_temp = {}
 
         if self.config.render_mode == "human":
             self.renderer = _create_renderer(
@@ -133,25 +135,35 @@ class VexEnv:
             "red_robot": red_robot,
             "blue_robot": blue_robot,
             "balls": tracked_balls,
+            "elapsed_time_s": self.action_count / self.config.inference_hz,
+            "max_duration_s": self.config.max_duration_s,
         }
 
+    def _update_time_metadata(self):
+        self.field_dict["elapsed_time_s"] = self.action_count / self.config.inference_hz
+        self.field_dict["max_duration_s"] = self.config.max_duration_s
+
     def reset(self) -> Dict[str, Any]:
+        self.action_count = 0
         self._build_world()
-        self.sim_time_s = 0.0
-        self.decision_elapsed_s = 0.0
-        self.render_elapsed_s = 0.0
-        self.done = False
+        self._update_time_metadata()
+        done = False
         if self.renderer is not None:
             self.render()
         self._update_ball_relative_states()
         # TODO: return initial observation
-        return {}
+        return {'done': done}
 
     def step(self, action: Dict[str, Any]) -> Dict[str, Any]:
         """Step env
 
         Args:
-            action : Action dict for both red and blue. Each contain 6 discrete and 4 continuous. 
+            action : Action dict for both red and blue.
+            Required keys per player:
+            - discrete: action type index [0..5]
+            - move_x: MOVE x-bin index [0..N-1]
+            - move_y: MOVE y-bin index [0..N-1]
+            - move_theta: MOVE heading-bin index [0..K-1]
             
             Discrete: 
             - 0: NO-OP
@@ -160,29 +172,30 @@ class VexEnv:
             - 3: PICKUP GROUND
             - 4: SCORE
             - 5: BLOCK
-            
-            Continuous:
-            - delta_x: [-1, 1] offset from current position, scaled by self.config.max_offset
-            - delta_y: [-1, 1] offset from current position, scaled by self.config.max_offset
-            - sin(delta_theta): relative turn command
-            - cos(delta_theta): relative turn command
-            
-            Note: Continuous inputs are only used for MOVE action. 
+
+            MOVE bins are only used when discrete == 1.
         """
-        
-        self.total_actions += 1
+        step_start_time = time.time()
+        self.action_count += 1
+        self._update_time_metadata()
         for player in ["red", "blue"]:
             dis_act = action[player]["discrete"]
-            cont_act = action[player]["continuous"]
             robot = self.field_dict[f"{player}_robot"]
 
             if dis_act == 0: # NO-OP
                 pass
             elif dis_act == 1: # MOVE
-                delta_x, delta_y, sin_theta, cos_theta = cont_act
-                target_x = robot.body.position.x + delta_x * self.config.max_offset
-                target_y = robot.body.position.y + delta_y * self.config.max_offset
-                target_theta = robot.body.angle + math.atan2(sin_theta, cos_theta)
+                x_idx = action[player]["move_x"]
+                y_idx = action[player]["move_y"]
+                theta_idx = action[player]["move_theta"]
+
+                delta_x = -self.config.max_offset + (2.0 * self.config.max_offset * x_idx) / (self.config.N - 1)
+                delta_y = -self.config.max_offset + (2.0 * self.config.max_offset * y_idx) / (self.config.N - 1)
+                delta_theta = -math.pi + (2.0 * math.pi * (theta_idx + 0.5)) / self.config.K
+
+                target_x = robot.body.position.x + delta_x
+                target_y = robot.body.position.y + delta_y
+                target_theta = robot.body.angle + delta_theta
                 robot.set_motion_target((target_x, target_y), target_theta)
             elif dis_act == 2: # PICKUP LOADERS
                 robot.pickup_loader()
@@ -193,14 +206,27 @@ class VexEnv:
             elif dis_act == 5: # BLOCK
                 robot.block_goal()
         
+        update_engine_start_time = time.time()
         self.update_world()
+        update_engine_end_time = time.time()
         for player in ["red", "blue"]:
             robot = self.field_dict[f"{player}_robot"]
             robot.clear_action_attempt()
         self._sync_inventory_ball_positions()
+        relative_start_time = time.time()
         self._update_ball_relative_states()
+        relative_end_time = time.time()
+        get_legal_start_time = time.time()
         legal_actions = self.get_legal_actions()
-        return {'legal_actions': legal_actions} # TODO: also return observation and reward
+        get_legal_end_time = time.time()
+        self.time_temp["get_legal_actions_time"] = self.time_temp.get("get_legal_actions_time", 0) + (get_legal_end_time - get_legal_start_time)
+        done = self.action_count >= self.max_actions
+        step_end_time = time.time()
+        self.time_temp["step_time"] = self.time_temp.get("step_time", 0) + (step_end_time - step_start_time)
+        self.time_temp["engine_update_time"] = self.time_temp.get("engine_update_time", 0) + (update_engine_end_time - update_engine_start_time)
+        self.time_temp["relative_update_time"] = self.time_temp.get("relative_update_time", 0) + (relative_end_time - relative_start_time)
+        red_score, blue_score = self.get_match_score()
+        return {'legal_actions': legal_actions, 'done': done, 'red_score': red_score, 'blue_score': blue_score} # TODO: also return observation and reward
 
     def _sync_inventory_ball_positions(self):
         for player in ["red", "blue"]:
@@ -224,7 +250,7 @@ class VexEnv:
             ball_colour = ball.colour
             relative = relative_r if ball_colour == "red" else relative_blue
             robot = red_robot if ball_colour == "red" else blue_robot
-            can_pickup = relative["distance"] <= dist_threshold and abs(relative["delta_theta"]) <= angle_threshold and len(robot.inventory) <= robot.capacity
+            can_pickup = relative["distance"] <= dist_threshold and abs(relative["delta_theta"]) <= angle_threshold and len(robot.inventory) < robot.capacity
             if can_pickup:
                 if relative["distance"] < min_r and ball_colour == "red":
                     red_robot._pickup_ball = ball
@@ -234,29 +260,13 @@ class VexEnv:
                     min_b = relative["distance"]
 
     def update_world(self):
-        while self.decision_elapsed_s < self.model_query_dt:
-            tick_start = time.perf_counter()
+        for istep in range(self.n_engine_updates):
             self.field_dict["red_robot"].update(self.engine_update_dt)
             self.field_dict["blue_robot"].update(self.engine_update_dt)
             step_space(self.space, self.engine_update_dt)
-            self.render_elapsed_s += self.engine_update_dt
 
-            if self.renderer is not None:
-                if self.render_update_dt is not None and self.render_elapsed_s >= self.render_update_dt:
-                    self.render()
-                    self.render_elapsed_s = 0.0
-
-                elapsed_tick = time.perf_counter() - tick_start
-                sleep_time = self.engine_update_dt - elapsed_tick
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-
-            self.decision_elapsed_s += self.engine_update_dt
-            self.sim_time_s += self.engine_update_dt
-            if self.sim_time_s >= self.config.max_duration_s:
-                self.done = True
-                break
-        self.decision_elapsed_s = 0.0
+            if self.renderer is not None and istep % self.n_render_updates == 0:
+                self.render()
 
     def _find_nearest_building_target(self, robot, opponent_robot, goals):
         """ Find goal to score or block based on proximity and angle to the scoring positions.
@@ -319,7 +329,6 @@ class VexEnv:
         """Return legal discrete actions for both players.
 
         Discrete action indices: [NO-OP, MOVE, PICKUP LOADERS, PICKUP GROUND, SCORE, BLOCK]
-        Continuous actions are always legal.
         """
         legal_actions: Dict[str, Any] = {}
         goals = [self.field_dict["CGL"], self.field_dict["CGU"], self.field_dict["LG1"], self.field_dict["LG2"]]
@@ -339,7 +348,7 @@ class VexEnv:
             can_score = score_target is not None
             can_block = block_target is not None
             can_pickup_loader = loader_target is not None
-            can_pickup_ground = robot._pickup_ball is not None and len(robot.inventory) < robot.capacity
+            can_pickup_ground = robot._pickup_ball is not None 
             discrete_mask = [True, True, can_pickup_loader, can_pickup_ground, can_score, can_block]
             legal_actions[player] = {
                 "discrete_mask": discrete_mask,
@@ -348,6 +357,16 @@ class VexEnv:
             robot._building_block_target = block_target
             robot._building_loader_target = loader_target
         return legal_actions
+
+    def get_match_score(self) -> tuple[int, int]:
+        goals = [self.field_dict["CGL"], self.field_dict["CGU"], self.field_dict["LG1"], self.field_dict["LG2"]]
+        red_total = 0
+        blue_total = 0
+        for goal in goals:
+            red_goal_score, blue_goal_score = goal.get_game_score()
+            red_total += red_goal_score
+            blue_total += blue_goal_score
+        return red_total, blue_total
         
     def render(self):
         if self.renderer is None:
@@ -361,29 +380,29 @@ class VexEnv:
 
 import time 
 if __name__ == "__main__":
-    env = VexEnv(Config(render_mode=None, engine_hz=50.0, env_hz=5.0, max_duration_s=120.0))
+    env = VexEnv(Config(render_mode=None, engine_hz=60.0, inference_hz=5.0, max_duration_s=120.0, render_hz=30.0))
     start_time = time.time()
     for i in range(1):
-        env.reset()
-        while not env.done:
+        out = env.reset()
+        while not out['done']:
             action = {}
             legal_actions = env.get_legal_actions()
             for player in ["red", "blue"]:
-                theta = random.uniform(-math.pi, math.pi)
                 possible_actions = [i for i in range(1, 6) if legal_actions[player]["discrete_mask"][i]]
                 da = random.choice(possible_actions) 
                 action[player] = {
                     "discrete": da,
-                    "continuous": [
-                        random.uniform(-1.0, 1.0),
-                        random.uniform(-1.0, 1.0),
-                        math.sin(theta),
-                        math.cos(theta),
-                    ],
+                    "move_x": random.randrange(env.config.N),
+                    "move_y": random.randrange(env.config.N),
+                    "move_theta": random.randrange(env.config.K),
                 }
-            env.step(action)
+            out = env.step(action)
+        print(f"Final Score - Red: {out['red_score']}, Blue: {out['blue_score']}")
     env.close()
     end_time = time.time()
     print(f"Episode finished in {end_time - start_time:.2f} seconds.")
-    print(f"Total actions taken: {env.total_actions}")
-
+    print(f"Total actions taken: {env.action_count}")
+    print(f"Total step time: {env.time_temp.get('step_time', 0):.2f} seconds.")
+    print(f"Total engine update time: {env.time_temp.get('engine_update_time', 0):.2f} seconds.")
+    print(f"Total get_legal_actions time: {env.time_temp.get('get_legal_actions_time', 0):.2f} seconds.")
+    print(f"Total relative state update time: {env.time_temp.get('relative_update_time', 0):.2f} seconds.")
