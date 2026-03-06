@@ -1,0 +1,154 @@
+field:
+  width: 356.6922
+  height: 356.6922
+
+
+loader:
+  loader_1: 
+    position: [6.5532, 59.5376]
+    preload: ['red', 'red', 'red', 'blue', 'blue', 'blue']
+    width: 11.811
+    height: 10.5918 # this is y axis, not z
+    capacity: 6
+    angle: 0
+  loader_2: 
+    position: [6.5532, 297.1546]
+    preload: ['red', 'red', 'red', 'blue', 'blue', 'blue']
+    width: 11.811
+    height: 10.5918 # this is y axis, not z
+    capacity: 6
+    angle: 0
+  loader_3: 
+    position: [350.139, 297.1546]
+    preload: ['blue', 'blue', 'blue', 'red', 'red', 'red']
+    width: 11.811
+    height: 10.5918 # this is y axis, not z
+    capacity: 6
+    angle: 0
+  loader_4: 
+    position: [350.139, 59.5376]
+    preload: ['blue', 'blue', 'blue', 'red', 'red', 'red']
+    width: 11.811
+    height: 10.5918 # this is y axis, not z
+    capacity: 6
+    angle: 0
+
+goal:
+  center_lower:
+    position: [178.3461, 178.3461]
+    width: 57.399
+    height: 10.531
+    angle: 45
+    capacity: 7
+  center_upper:
+    position: [178.3461, 178.3461]
+    width: 57.399
+    height: 14.053
+    angle: -45
+    capacity: 7
+  long_1:
+    position: [179.7504, 59.5376]
+    width: 123.925
+    height: 14.053
+    angle: 0
+    capacity: 15
+  long_2:
+    position: [179.7504, 297.1546]
+    width: 123.925
+    height: 14.053
+    angle: 0
+    capacity: 15
+
+leg:
+  leg1:
+    position: [122.5931, 297.1546]
+    size: 10.16
+  leg2:
+    position: [234.0991, 297.1546]
+    size: 10.16
+  leg3:
+    position: [122.5931, 59.5376]
+    size: 10.16
+  leg4:
+    position: [234.0991, 59.5376]
+    size: 10.16
+
+wall:
+  thickness: 3.2258
+
+robot:
+  mass: 50 
+  size: 38.1
+  max_velocity: 100
+  max_angular_velocity: 360
+  arrival_dist_eps: 1.0 # translation arrival distance threshold
+  arrival_angle_eps: 5.0 # rotation arrival angle threshold in degrees
+  pickup_ground_completion_dist: 21.78474 # distance threshold for completing pickup from the ground: robot_size / 2 + ball_radius * 2/3
+  pickup_ground_approach_dist: 25.20315 # standoff distance before charging to ball: robot_size / 2 + ball_radius * 1.5
+  capacity: 10
+  robot_red:
+    initial_position: [76.2, 178.3461]
+    initial_rotation: 0
+  robot_blue:
+    initial_position: [280.4922, 178.3461]
+    initial_rotation: 180
+ball:
+  mass: 0.5 
+  radius: 4.1021
+  linear_damping: 0.98
+  angular_damping: 0.99
+  stop_speed: 1.0
+  stop_angular_speed: 5.0 
+  friction: 0.7
+  elasticity: 0.1
+
+initial_ground_ball_positions:
+  red:
+    - [294.0304, 4.0894]
+    - [304.6144, 4.0894]
+    - [294.0304, 352.6028]
+    - [304.6144, 352.6028]
+    - [321.1068, 166.0144]
+    - [321.1068, 174.2186]
+    - [321.1068, 182.4228]
+    - [321.1068, 190.627]
+    - [118.4910, 118.4402]
+    - [118.4910, 126.6952]
+    - [118.4910, 229.9462]
+    - [118.4910, 238.2012]
+    - [126.6952, 118.4402]
+    - [126.6952, 229.9462]
+    - [174.2440, 59.5376]
+    - [174.2440, 297.1546]
+    - [166.0398, 59.5376]
+    - [166.0398, 297.1546]
+  blue:
+    - [62.6618, 352.6028]
+    - [52.0778, 352.6028]
+    - [62.6618, 4.0894]
+    - [52.0778, 4.0894]
+    - [35.5854, 190.6778]
+    - [35.5854, 182.4736]
+    - [35.5854, 174.2694]
+    - [35.5854, 166.0652]
+    - [238.2012, 238.2520]
+    - [238.2012, 229.9970]
+    - [238.2012, 126.7460]
+    - [238.2012, 118.4910]
+    - [229.9970, 238.2520]
+    - [229.9970, 126.7460]
+    - [182.4482, 297.1546]
+    - [182.4482, 59.5376]
+    - [190.6524, 297.1546]
+    - [190.6524, 59.5376]
+
+category_flag:
+  robot: 1
+  ball_red: 2
+  ball_blue: 4
+  goal_upper: 8
+
+blocking:
+  distance_threshold: 1.0
+  angle_threshold: 5.0
+

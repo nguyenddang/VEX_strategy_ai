@@ -1,13 +1,8 @@
 import pygame
 import pymunk
 import math
-
-try:
-    from engine import FIELD_WIDTH, FIELD_HEIGHT, ROBOT_SIZE, BALL_RADIUS, Ball
-except ImportError:
-    from env.engine import FIELD_WIDTH, FIELD_HEIGHT, ROBOT_SIZE, BALL_RADIUS, Ball
-
-
+from env.config import EnvConfig
+from env.type import Field
 INCH_TO_CM = 2.54
 GRID_SPACING_INCH = 3.23
 SHOW_REGION = True
@@ -22,34 +17,30 @@ GOAL_NEUTRAL_COLOUR = (255, 220, 0)
 
 
 class EnvRenderer:
-    def __init__(
-        self,
-        window_width: int = 1200,
-        window_height: int = 1200,
-        pickup_dist_threshold: float = ROBOT_SIZE * 1.5,
-        pickup_angle_threshold_deg: float = 45.0,
-        goal_dist_threshold: float = ROBOT_SIZE / 2,
-        goal_angle_threshold_deg: float = 45.0,
-        loader_dist_threshold: float = ROBOT_SIZE,
-    ):
+    def __init__(self, env_config: EnvConfig, engine_config):
         pygame.init()
-        self.field_view_width = window_width
-        self.window_height = window_height
+        self.field_view_width = env_config.window_width
+        self.window_height = env_config.window_height
         self.info_panel_width = max(220, int(self.field_view_width * 0.22))
         self.window_width = self.field_view_width + self.info_panel_width
-        self.scale_x = self.field_view_width / FIELD_WIDTH
-        self.scale_y = self.window_height / FIELD_HEIGHT
-        self.pickup_dist_threshold = pickup_dist_threshold
-        self.pickup_angle_threshold_rad = math.radians(pickup_angle_threshold_deg)
-        self.goal_dist_threshold = goal_dist_threshold
-        self.goal_angle_threshold_rad = math.radians(goal_angle_threshold_deg)
-        self.loader_dist_threshold = loader_dist_threshold
+        self.scale_x = self.field_view_width / engine_config['field']['width']
+        self.scale_y = self.window_height / engine_config['field']['height']
+        self.pickup_dist_threshold = env_config.ball_pickup_hitbox["dist_threshold"]
+        self.pickup_angle_threshold_rad = env_config.ball_pickup_hitbox["angle_threshold"]
+        self.goal_dist_threshold = env_config.goal_action_hitbox["dist_threshold"]
+        self.goal_angle_threshold_rad = env_config.goal_action_hitbox["angle_threshold"]
+        self.loader_dist_threshold = env_config.loader_pickup_hitbox["dist_threshold"]
         self.screen = pygame.display.set_mode((self.window_width, self.window_height))
         self.font = pygame.font.SysFont("consolas", 20)
         self._static_field_surface = None
         self._scored_balls_surface = None
         self._scored_balls_signature = None
         pygame.display.set_caption("Vex RL Env")
+        
+        self.field_width = engine_config['field']['width']
+        self.field_height = engine_config['field']['height']
+        self.ball_radius = engine_config['ball']['radius']
+        self.robot_size = engine_config['robot']['size']
 
     def _world_to_screen(self, point):
         return (
@@ -61,13 +52,13 @@ class EnvRenderer:
         step = GRID_SPACING_INCH * INCH_TO_CM
 
         x = 0.0
-        while x <= FIELD_WIDTH:
+        while x <= self.field_width:
             x_screen = int(x * self.scale_x)
             pygame.draw.line(self.screen, (195, 195, 195), (x_screen, 0), (x_screen, self.window_height), 1)
             x += step
 
         y = 0.0
-        while y <= FIELD_HEIGHT:
+        while y <= self.field_height:
             y_screen = int(self.window_height - y * self.scale_y)
             pygame.draw.line(self.screen, (195, 195, 195), (0, y_screen), (self.field_view_width, y_screen), 1)
             y += step
@@ -253,7 +244,7 @@ class EnvRenderer:
         if not hasattr(goal, "scored_balls"):
             return
 
-        radius_px = max(2, int(BALL_RADIUS * 0.7 * self.scale_x))
+        radius_px = max(2, int(self.ball_radius * 0.7 * self.scale_x))
 
         for scored_ball in goal.scored_balls:
             if scored_ball is None:
@@ -269,14 +260,14 @@ class EnvRenderer:
     def _draw_ball(self, ball):
         center = self._world_to_screen((ball.body.position.x, ball.body.position.y))
         render_color = TEAM_COLOURS.get(getattr(ball, "colour", None), (30, 30, 30))
-        pygame.draw.circle(self.screen, render_color, center, max(1, int(BALL_RADIUS * self.scale_x)))
+        pygame.draw.circle(self.screen, render_color, center, max(1, int(self.ball_radius * self.scale_x)))
 
     def _draw_robot(self, robot, body_color):
         body_points_world = [p.rotated(robot.body.angle) + robot.body.position for p in robot.shape.get_vertices()]
         body_points_screen = [self._world_to_screen((p.x, p.y)) for p in body_points_world]
         pygame.draw.polygon(self.screen, body_color, body_points_screen)
 
-        side = ROBOT_SIZE
+        side = self.robot_size
         cell_half = side / 6
         front_center = pymunk.Vec2d(side / 3, 0)
         front_tile_local = [
@@ -333,7 +324,8 @@ class EnvRenderer:
 
         self.screen.blit(overlay, (0, 0))
 
-    def render(self, field_dict):
+    def render(self, field: Field):
+        field_dict = field.to_field_dict()
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return None
