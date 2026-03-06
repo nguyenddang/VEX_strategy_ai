@@ -24,27 +24,28 @@ class LegalActionResolver:
         """
         goal_dist_threshold = self.goal_action_hitbox["dist_threshold"]
         goal_angle_threshold = self.goal_action_hitbox["angle_threshold"]
-        blocker_pos = (opponent_robot.body.position.x, opponent_robot.body.position.y)
+        blocker_pose = opponent_robot.cache_pose
+        curr_pose = robot.cache_pose
         score_target, block_target = None, None
         for goal in goals:
-            for side_index, scoring_position in zip(goal.score_side, goal.scoring_position):
-                dx = scoring_position[0] - robot.body.position.x
-                dy = scoring_position[1] - robot.body.position.y
-                target_distance = math.hypot(dx, dy)
+            goal._update_relative_to_robot(robot)
+        for goal in goals:
+            relative = goal.relative_stats[robot.key]
+            for side_index, rlt in enumerate(relative):
                 target_heading = math.atan2(
-                    goal.body.position.y - scoring_position[1],
-                    goal.body.position.x - scoring_position[0],
+                    goal.cache_pose['position'][1] - goal.scoring_position[side_index][1],
+                    goal.cache_pose['position'][0] - goal.scoring_position[side_index][0],
                 )
-                heading_error = normalize_angle(target_heading - robot.body.angle)
+                heading_error = normalize_angle(target_heading - curr_pose['angle'])
                 within_goal_hitbox = (
-                    target_distance <= goal_dist_threshold and abs(heading_error) <= goal_angle_threshold
+                    rlt['distance'] <= goal_dist_threshold and abs(heading_error) <= goal_angle_threshold
                 )
                 if not within_goal_hitbox:
                     continue
 
-                block_target = (scoring_position, target_heading, goal, side_index)
-                if goal.can_accept(entry_side=side_index, blocker_pos=blocker_pos) and len(robot.inventory) > 0:
-                    score_target = (scoring_position, target_heading, goal, side_index)
+                block_target = (goal.scoring_position[side_index], target_heading, goal, side_index)
+                if goal.can_accept(entry_side=side_index, blocker_pos=(blocker_pose['position'][0], blocker_pose['position'][1])) and len(robot.inventory) > 0:
+                    score_target = (goal.scoring_position[side_index], target_heading, goal, side_index)
                 return score_target, block_target
         return score_target, block_target
 
@@ -56,22 +57,19 @@ class LegalActionResolver:
         """
         loader_dist_threshold = self.loader_pickup_hitbox["dist_threshold"]
         loader_angle_threshold = self.loader_pickup_hitbox["angle_threshold"]
-        x_robot, y_robot = robot.body.position
-        theta_robot = robot.body.angle
+        for loader in loaders:
+            loader._update_relative_to_robot(robot)
         for loader in loaders:
             if loader.scored_balls[0] is None:
                 continue
             loading_position = loader.loading_position
-            dx = loading_position[0] - x_robot
-            dy = loading_position[1] - y_robot
-            target_distance = math.hypot(dx, dy)
+            relative = loader.relative_stats[robot.key]
             target_heading = math.atan2(
-                loader.body.position.y - loading_position[1],
-                loader.body.position.x - loading_position[0],
+                loader.cache_pose['position'][1] - loading_position[1],
+                loader.cache_pose['position'][0] - loading_position[0],
             )
-            heading_error = normalize_angle(target_heading - theta_robot)
             within_loader_hitbox = (
-                target_distance <= loader_dist_threshold and abs(heading_error) <= loader_angle_threshold
+                relative["distance"] <= loader_dist_threshold and abs(relative["delta_theta"]) <= loader_angle_threshold
             )
             if not within_loader_hitbox:
                 continue
@@ -88,11 +86,8 @@ class LegalActionResolver:
         dist_threshold = self.ball_pickup_hitbox["dist_threshold"]
         angle_threshold = self.ball_pickup_hitbox["angle_threshold"]
         pickup_ball = None
-        x_robot, y_robot = robot.body.position
-        theta_robot = robot.body.angle
-        robot_key = robot.key
         for ball in balls:
-            relative = ball.update_relative_to_robot(x_robot, y_robot, theta_robot, robot_key)
+            relative = ball.update_relative_to_robot(robot)
             if ball.state != "ground":
                 continue
             # determine pickup-able ball within hitbox for each robot. 

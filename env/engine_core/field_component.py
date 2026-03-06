@@ -64,6 +64,7 @@ class Ball:
         self.body = pymunk.Body(mass=ball_config['mass'], moment=moment, body_type=pymunk.Body.DYNAMIC)
         self.body.position = position
         self.body.velocity_func = self._apply_rolling_resistance
+        self.cache_pose = {'position': (self.body.position.x, self.body.position.y), 'angle': self.body.angle}
         self.shape = pymunk.Circle(self.body, ball_config['radius'])
         self.shape.friction = ball_config['friction']
         self.shape.elasticity = ball_config['elasticity']
@@ -71,7 +72,6 @@ class Ball:
         self.relative_stats = {}
         if add_sim:
             space.add(self.body, self.shape)
-        self.cache_position = position
         self.stop_angular_speed = math.radians(self.config['stop_angular_speed'])
 
     def _apply_rolling_resistance(self, body:pymunk.Body, gravity, damping, dt):
@@ -87,25 +87,30 @@ class Ball:
         if abs(body.angular_velocity) < self.stop_angular_speed:
             body.angular_velocity = 0
             
-    def update_relative_to_robot(self, x_robot, y_robot, theta_robot, robot_key):
+    def update_relative_to_robot(self, robot):
         """Calculate relative distance and angle to each robot for observation.
         """
-        dx = self.cache_position[0] - x_robot
-        dy = self.cache_position[1] - y_robot
+        x_robot, y_robot = robot.cache_pose['position']
+        theta_robot = robot.cache_pose['angle']
+        dx = self.cache_pose['position'][0] - x_robot
+        dy = self.cache_pose['position'][1] - y_robot
         relative_distance = math.hypot(dx, dy)
         delta_theta = normalize_angle(math.atan2(dy, dx) - theta_robot)
-        self.relative_stats[robot_key] = {
+        self.relative_stats[robot.key] = {
             "dx": dx,
             "dy": dy,
             "distance": relative_distance,
             "delta_theta": delta_theta,
         }
-        return self.relative_stats[robot_key]
+        return self.relative_stats[robot.key]
     
-    def _cache_position(self):
+    def _update_cache_pose(self):
         """Cache position to reduce repeated pymunk body.position call.
         """
-        self.cache_position = (self.body.position.x, self.body.position.y)
+        body = self.body
+        position, angle = body.position, body.angle
+        self.cache_pose['position'] = (position.x, position.y)
+        self.cache_pose['angle'] = angle
 
 class Goal:
     def __init__(
@@ -138,12 +143,14 @@ class Goal:
             self.shape.filter = pymunk.ShapeFilter(categories=8, mask=1)
         self.shape.friction = 1.0
         self.shape.elasticity = 0.0
+        self.cache_pose = {'position': (self.body.position.x, self.body.position.y), 'angle': self.body.angle}
         # keep track of scored balls
         self.scored_balls: List[Optional[Ball]] = [None] * self.capacity
         self.score_side = [0, 1]
         self.scoring_position = self._create_scoring_position()
         self.slot_position = [self._slot_world_position(i) for i in range(self.capacity)]
         space.add(self.body, self.shape)
+        self.relative_stats = {}
 
     def _slot_world_position(self, slot_index: int):
         """Calculate xy of each ball in the goal
@@ -152,9 +159,29 @@ class Goal:
         start_offset = -self.width / 2 + step
         offset = start_offset + slot_index * step
         return (
-            self.body.position.x + math.cos(self.body.angle) * offset,
-            self.body.position.y + math.sin(self.body.angle) * offset,
+            self.cache_pose['position'][0] + math.cos(self.cache_pose['angle']) * offset,
+            self.cache_pose['position'][1] + math.sin(self.cache_pose['angle']) * offset,
         )
+        
+    def _update_relative_to_robot(self, robot) -> List[Dict[str, float]]:
+        """Calculate relative distance and angle to the robot from scoring position for observation.
+        """
+        x_robot, y_robot = robot.cache_pose['position']
+        theta_robot = robot.cache_pose['angle']
+        temp = []
+        for score_pos in self.scoring_position:
+            dx = score_pos[0] - x_robot
+            dy = score_pos[1] - y_robot
+            relative_distance = math.hypot(dx, dy)
+            delta_theta = normalize_angle(math.atan2(dy, dx) - theta_robot)
+            temp.append({
+                "dx": dx,
+                "dy": dy,
+                "distance": relative_distance,
+                "delta_theta": delta_theta,
+            })
+        self.relative_stats[robot.key] = temp
+        return self.relative_stats[robot.key]
 
     def _debug_slot_signature(self):
         """Debugging prints
@@ -184,7 +211,7 @@ class Goal:
         output_pos = self.scoring_position[output_side]
         dx = blocker_pos[0] - output_pos[0]
         dy = blocker_pos[1] - output_pos[1]
-        heading_error = normalize_angle(math.atan2(dy, dx) - self.body.angle)
+        heading_error = normalize_angle(math.atan2(dy, dx) - self.cache_pose['angle'])
         is_blocking = abs(heading_error) <= math.radians(self.blocking_config['angle_threshold']) and math.hypot(dx, dy) <= self.blocking_config['distance_threshold']
         return not is_blocking
 
@@ -230,15 +257,15 @@ class Goal:
             ejected_ball.state = "ground"
             output_side = 1 if entry_side == 0 else 0
             output_pos = self.scoring_position[output_side]
-            out_dx = output_pos[0] - self.body.position.x
-            out_dy = output_pos[1] - self.body.position.y
+            out_dx = output_pos[0] - self.cache_pose['position'][0]
+            out_dy = output_pos[1] - self.cache_pose['position'][1]
             out_dist = math.hypot(out_dx, out_dy)
-            out_x = out_dx / out_dist if out_dist > 1e-8 else math.cos(self.body.angle)
-            out_y = out_dy / out_dist if out_dist > 1e-8 else math.sin(self.body.angle)
+            out_x = out_dx / out_dist if out_dist > 1e-8 else math.cos(self.cache_pose['angle'])
+            out_y = out_dy / out_dist if out_dist > 1e-8 else math.sin(self.cache_pose['angle'])
             eject_distance = self.width / 2 + self.ball_config['radius'] * 1.25
             ejected_ball.body.position = (
-                self.body.position.x + out_x * eject_distance,
-                self.body.position.y + out_y * eject_distance,
+                self.cache_pose['position'][0] + out_x * eject_distance,
+                self.cache_pose['position'][1] + out_y * eject_distance,
             )
             ejected_ball.body.velocity = (0, 0)
             ejected_ball.body.angular_velocity = 0
@@ -258,38 +285,38 @@ class Goal:
         half_length = self.width / 2
         half_robot = self.robot_config['size'] / 2
         clearance = half_length + half_robot + 2
-        cos = math.cos(self.body.angle)
+        cos = math.cos(self.cache_pose['angle'])
         if self.key == "center_lower":
             return [
                 (
-                    self.body.position.x - cos * clearance,
-                    self.body.position.y - cos * clearance,
+                    self.cache_pose['position'][0] - cos * clearance,
+                    self.cache_pose['position'][1] - cos * clearance,
                 ),
                 (
-                    self.body.position.x + cos * clearance,
-                    self.body.position.y + cos * clearance,
+                    self.cache_pose['position'][0] + cos * clearance,
+                    self.cache_pose['position'][1] + cos * clearance,
                 ),
             ]
         elif self.key == "center_upper":
             return [
                 (
-                    self.body.position.x - cos * clearance,
-                    self.body.position.y + cos * clearance,
+                    self.cache_pose['position'][0] - cos * clearance,
+                    self.cache_pose['position'][1] + cos * clearance,
                 ),
                 (
-                    self.body.position.x + cos * clearance,
-                    self.body.position.y - cos * clearance,
+                    self.cache_pose['position'][0] + cos * clearance,
+                    self.cache_pose['position'][1] - cos * clearance,
                 ),
             ]
         else:
             return [
                 (
-                    self.body.position.x - cos * clearance,
-                    self.body.position.y,
+                    self.cache_pose['position'][0] - cos * clearance,
+                    self.cache_pose['position'][1],
                 ),
                 (
-                    self.body.position.x + cos * clearance,
-                    self.body.position.y,
+                    self.cache_pose['position'][0] + cos * clearance,
+                    self.cache_pose['position'][1],
                 ),
             ]
     def has_control_zone(self, robot_key: str):
@@ -417,6 +444,7 @@ class Loader:
         self.body = pymunk.Body(body_type=pymunk.Body.STATIC)
         self.body.position = position
         self.body.angle = 0.0
+        self.cache_pose = {'position': (self.body.position.x, self.body.position.y), 'angle': self.body.angle}
         self.shape = pymunk.Poly.create_box(self.body, size=(loader_config['width'], loader_config['height']))
         self.shape.friction = 1.0
         self.shape.elasticity = 0.0
@@ -433,9 +461,27 @@ class Loader:
         self.key = key
         self.capacity = loader_config['capacity']
         self.scored_balls: List[Optional[Ball]] = [None] * self.capacity
-        self.prepopulate_balls(loader_config['preload'])
+        self._prepopulate_balls(loader_config['preload'])
+        self.relative_stats = {}
+        
+    def _update_relative_to_robot(self, robot):
+        """Calculate relative distance and angle to the robot from loading position for observation.
+        """
+        x_robot, y_robot = robot.cache_pose['position']
+        theta_robot = robot.cache_pose['angle']
+        dx = self.loading_position[0] - x_robot
+        dy = self.loading_position[1] - y_robot
+        relative_distance = math.hypot(dx, dy)
+        delta_theta = normalize_angle(math.atan2(dy, dx) - theta_robot)
+        self.relative_stats[robot.key] = {
+            "dx": dx,
+            "dy": dy,
+            "distance": relative_distance,
+            "delta_theta": delta_theta,
+        }
+        return self.relative_stats[robot.key]
 
-    def prepopulate_balls(self, preload_list: List[str]):
+    def _prepopulate_balls(self, preload_list: List[str]):
         for slot_idx, ball_colour in enumerate(preload_list):
             ball = Ball(
                 self.body.space,
@@ -443,7 +489,7 @@ class Loader:
                 colour=ball_colour,
                 state=self.key,
                 add_sim=False,
-                position=(self.body.position.x, self.body.position.y),
+                position=(self.cache_pose['position'][0], self.cache_pose['position'][1]),
             )
             ball.body.velocity = (0, 0)
             ball.body.angular_velocity = 0

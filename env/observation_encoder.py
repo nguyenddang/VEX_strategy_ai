@@ -2,8 +2,9 @@ import time
 import torch
 from env.type import Field
 from env.config import EnvConfig
+from env.engine_core.utils import normalize_angle
 import math
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple
 class ObservationEncoder:
     def __init__(self, env_config: EnvConfig, engine_config: Dict[str, Any]):
         self.env_config = env_config
@@ -26,8 +27,24 @@ class ObservationEncoder:
 
     def encode(self, field: Field) -> Dict[str, torch.Tensor]:
         """Encode field state into observations for both robots.
-
-        Observations are in red-canonical frame, so blue robot observations are mirrored into red-canonical frame. 
+        Observations are in red-canonical frame, so blue robot observations are mirrored into red-canonical frame.
+        Observation scheme (for each robot):
+            core_obs (85):
+                - time_norm (1): normalized time step in the episode (0 to 1)
+                - score_diff_norm (1): normalized score difference (own score - opponent score) / 166
+                - bottom_long_control (3): one-hot [current_view_control, opponent_view_control, nobody_control]
+                - upper_long_control (3): one-hot [current_view_control, opponent_view_control, nobody_control]
+                - cgl_majority (3): one-hot [current_view_majority, opponent_view_majority, nobody_majority]
+                - cgu_majority (3): one-hot [current_view_majority, opponent_view_majority, nobody_majority]
+                - x_norm, y_norm, cos_theta, sin_theta (4): normalized x and y positions and heading of robot
+                - opp_x_norm, opp_y_norm, opp_cos_theta, opp_sin_theta (4): normalized x and y positions and heading of opponent robot
+                - score_norm, opp_score_norm (2): normalized score of robot and opponent
+                - robot_inventory_norm (1): normalized inventory size of robot
+                - goal/loader relative block (60): flattened (12 x 5) in this row order:
+                  [LG1 side0, LG1 side1, LG2 side0, LG2 side1, CGL side0, CGL side1, CGU side0, CGU side1, LD1, LD2, LD3, LD4]
+                  and feature order [dx, dy, dist, heading_err_sin, heading_err_cos].
+                  For robot_blue, long goals and loaders are flipped to preserve red-canonical semantics.
+            ball_obs (num_balls x 28): for each ball, see _get_balls_obs for details
         """
         field_dict = field.to_field_dict()
         observations = {
@@ -52,50 +69,117 @@ class ObservationEncoder:
             opp_score_norm = blue_score / 166.0 if key == 'robot_red' else red_score / 166.0
             robot_inventory_norm = len(field_dict[key].inventory) / self.engine_config['robot']['capacity']
             core_obs = torch.tensor([
-                time_norm, score_diff_norm, bottom_long_control, upper_long_control, cgl_majority, cgu_majority,
+                time_norm, score_diff_norm,
+                *bottom_long_control, *upper_long_control, *cgl_majority, *cgu_majority,
                 x_norm, y_norm, cos_theta, sin_theta, opp_x_norm, opp_y_norm, opp_cos_theta, opp_sin_theta,
                 score_norm, opp_score_norm, robot_inventory_norm
             ], dtype=torch.float32)
+            goal_loader_obs = self._get_goal_loader_obs(field_dict, robot_key=key)
+            core_obs = torch.cat([core_obs, goal_loader_obs], dim=0)
             observations[key]['core'] = core_obs
             ball_obs = self._get_balls_obs(field_dict, robot_key=key)
             observations[key]['balls'] = ball_obs
         return observations
 
-    def _long_control_bool(self, field_dict: Dict[str, Any], robot_key) -> bool: 
-        """Return 2 boolean indicating control zone capture for LG1, and LG2 of robot_key.
+
+    def _owner_one_hot(self, current_view_has_control: bool, opponent_view_has_control: bool) -> list[float]:
+        """Encode control ownership as one-hot [current_view, opponent_view, nobody]."""
+        if current_view_has_control:
+            return [1.0, 0.0, 0.0]
+        if opponent_view_has_control:
+            return [0.0, 1.0, 0.0]
+        return [0.0, 0.0, 1.0]
+
+    def _long_control_bool(self, field_dict: Dict[str, Any], robot_key): 
+        """Return two one-hot vectors for long-goal control in red-canonical order.
+
         Since observation is red-canonical, for robot_blue, LG1 would be LG2 and LG2 would be LG1. 
-        Boolean return indicate control for bottom long goal (LG1 in red-canonical) and upper long goal (LG2 in red-canonical) respectively.
+        Returns:
+            - bottom long goal ownership one-hot [current_view, opponent_view, nobody]
+            - upper long goal ownership one-hot [current_view, opponent_view, nobody]
         """
         if robot_key == "robot_red":
-            bottom_control = field_dict["LG1"].has_control_zone(robot_key)
-            upper_control = field_dict["LG2"].has_control_zone(robot_key)
+            bottom_goal, upper_goal, opponent_key = field_dict["long_1"], field_dict["long_2"], "robot_blue"
         else:
-            bottom_control = field_dict["LG2"].has_control_zone(robot_key)
-            upper_control = field_dict["LG1"].has_control_zone(robot_key)
+            bottom_goal, upper_goal, opponent_key = field_dict["long_2"], field_dict["long_1"], "robot_red"
+        bottom_control = self._owner_one_hot(
+            current_view_has_control=bottom_goal.has_control_zone(robot_key),
+            opponent_view_has_control=bottom_goal.has_control_zone(opponent_key),
+        )
+        upper_control = self._owner_one_hot(
+            current_view_has_control=upper_goal.has_control_zone(robot_key),
+            opponent_view_has_control=upper_goal.has_control_zone(opponent_key),
+        )
         return bottom_control, upper_control
     
-    def center_majority_bool(self, field_dict: Dict[str, Any], robot_key) -> bool:
-        """Return 2 boolean indicating majority control for center lower and center upper for robot_key. 
+    def center_majority_bool(self, field_dict: Dict[str, Any], robot_key):
+        """Return two one-hot vectors for center-goal majority ownership.
+
         Center goals are not affected by red-canonical. 
-        Boolean return indicate majority for center lower and center upper respectively.
+        Returns:
+            - center lower majority one-hot [current_view, opponent_view, nobody]
+            - center upper majority one-hot [current_view, opponent_view, nobody]
         """
-        cgl_majority = field_dict["CGL"].has_majority(robot_key)
-        cgu_majority = field_dict["CGU"].has_majority(robot_key)
+        opponent_key = "robot_blue" if robot_key == "robot_red" else "robot_red"
+        cgl_majority = self._owner_one_hot(
+            current_view_has_control=field_dict["center_lower"].has_majority(robot_key),
+            opponent_view_has_control=field_dict["center_lower"].has_majority(opponent_key),
+        )
+        cgu_majority = self._owner_one_hot(
+            current_view_has_control=field_dict["center_upper"].has_majority(robot_key),
+            opponent_view_has_control=field_dict["center_upper"].has_majority(opponent_key),
+        )
         return cgl_majority, cgu_majority
     
+    def _get_goal_loader_obs(self, field_dict: Dict[str, Any], robot_key: str):
+        """Return relative position obs for goals and loaders for robot_key. 
+        
+        Obs order: [LG1 side0, LG1 side1, LG2 side0, LG2 side1, CGL side0, CGL side1, CGU side0, CGU side1, LD1, LD2, LD3, LD4]
+        For robot_blue, long goals and loaders are flipped to preserve red-canonical semantics.
+        Each obs is [dx_norm, dy_norm, dist_norm, heading_err_sin, heading_err_cos].
+        """
+        ORDER_RED = ['long_1', 'long_2', 'center_lower', 'center_upper', 'loader_1', 'loader_2', 'loader_3', 'loader_4']
+        ORDER_BLUE = ['long_2', 'long_1', 'center_lower', 'center_upper', 'loader_3', 'loader_4', 'loader_1', 'loader_2']
+        side = [0, 1] if robot_key == "robot_red" else [1, 0]
+        order = ORDER_RED if robot_key == "robot_red" else ORDER_BLUE
+        raw_obs = []
+        for key in order:
+            if not key.startswith("loader"):
+                for s in side:
+                    relative = field_dict[key].relative_stats[robot_key][s]
+                    dx, dy, dist, delta_theta = relative["dx"], relative["dy"], relative["distance"], relative["delta_theta"]
+                    dx_norm, dy_norm = dx / self.engine_config['field']['width'], dy / self.engine_config['field']['height']
+                    heading_err_sin, heading_err_cos = math.sin(delta_theta), math.cos(delta_theta)
+                    dist_norm = dist / math.hypot(self.engine_config['field']['width'], self.engine_config['field']['height'])
+                    if robot_key == "robot_blue":
+                        dx_norm, dy_norm = -dx_norm, -dy_norm
+                    raw_obs.append([dx_norm, dy_norm, dist_norm, heading_err_sin, heading_err_cos])
+        for key in order:
+            if key.startswith("loader"):
+                relative = field_dict[key].relative_stats[robot_key]
+                dx, dy, dist, delta_theta = relative["dx"], relative["dy"], relative["distance"], relative["delta_theta"]
+                dx_norm, dy_norm = dx / self.engine_config['field']['width'], dy / self.engine_config['field']['height']
+                heading_err_sin, heading_err_cos = math.sin(delta_theta), math.cos(delta_theta)
+                dist_norm = dist / math.hypot(self.engine_config['field']['width'], self.engine_config['field']['height'])
+                if robot_key == "robot_blue":
+                    dx_norm, dy_norm = -dx_norm, -dy_norm
+                raw_obs.append([dx_norm, dy_norm, dist_norm, heading_err_sin, heading_err_cos])
+        raw_obs = torch.tensor(raw_obs, dtype=torch.float32).flatten()
+        return raw_obs
+
     def _get_position_norm(self, field_dict: Dict[str, Any], robot_key: str):
         """Returns x_norm, y_norm, cos(theta), sin(theta) for robot_key and opponent robot in red-canonical frame.          
         Function ensures blue robot observations are mirrored into red-canonical frame. 
         """
         curr_robot = field_dict[robot_key]
-        x, y = curr_robot.body.position
-        theta = curr_robot.body.angle
+        x, y = curr_robot.cache_pose['position']
+        theta = curr_robot.cache_pose['angle']
         x_norm, y_norm = x / self.engine_config['field']['width'], y / self.engine_config['field']['height']
         cos_theta, sin_theta = math.cos(theta), math.sin(theta)
         
         opp_robot = field_dict["robot_blue"] if robot_key == "robot_red" else field_dict["robot_red"]
-        opp_x, opp_y = opp_robot.body.position
-        opp_theta = opp_robot.body.angle
+        opp_x, opp_y = opp_robot.cache_pose['position']
+        opp_theta = opp_robot.cache_pose['angle']
         opp_x_norm, opp_y_norm = opp_x / self.engine_config['field']['width'], opp_y / self.engine_config['field']['height']
         opp_cos_theta, opp_sin_theta = math.cos(opp_theta), math.sin(opp_theta)
         
@@ -129,12 +213,26 @@ class ObservationEncoder:
             - For ball that are N/A, all other attributes set to -2.
             - ball obs are red-canonical
         """
+        ball_map_blue = {
+            'ground': 'ground',
+            'long_1': 'long_2',
+            'long_2': 'long_1',
+            'center_lower': 'center_lower',
+            'center_upper': 'center_upper',
+            'loader_1': 'loader_3',
+            'loader_2': 'loader_4',
+            'loader_3': 'loader_1',
+            'loader_4': 'loader_2',
+            'N/A': 'N/A',
+            'robot_red': 'robot_red',
+            'robot_blue': 'robot_blue',
+        }
         opp_robot = field_dict["robot_blue"] if robot_key == "robot_red" else field_dict["robot_red"]
         balls_obs_p1 = []
         ball_obs_p2_idx = []
-        x_curr_robot, y_curr_robot = field_dict[robot_key].body.position
+        x_curr_robot, y_curr_robot = field_dict[robot_key].cache_pose['position']
         for i, ball in enumerate(field_dict["balls"]):
-            relative = ball.relative_stats[robot_key]
+            relative = ball.relative_stats.get(robot_key)
             dx, dy, dist, delta_theta = relative["dx"], relative["dy"], relative["distance"], relative["delta_theta"]
             dx_norm, dy_norm = dx / self.engine_config['field']['width'], dy / self.engine_config['field']['height']
             x, y = x_curr_robot + dx, y_curr_robot + dy
@@ -143,12 +241,7 @@ class ObservationEncoder:
             dist_norm = dist / math.hypot(self.engine_config['field']['width'], self.engine_config['field']['height'])
             ball_state = ball.state
             ball_colour = ball.colour if robot_key == 'robot_red' else ("red" if ball.colour == "blue" else "blue")
-            
-            if ball_state == 'long_1':
-                ball_state = 'long_2' if robot_key == 'robot_blue' else 'long_1'
-            elif ball_state == 'long_2':
-                ball_state = 'long_1' if robot_key == 'robot_blue' else 'long_2'
-            
+            ball_state = ball_map_blue[ball_state] if robot_key == "robot_blue" else ball_state
             if ball_state == robot_key:
                 one_hot_idx = self.ball_state_to_one_hot["in_possession"][ball_colour]
             elif ball_state == opp_robot.key or ball_state == "N/A":

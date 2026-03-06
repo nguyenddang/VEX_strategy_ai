@@ -35,6 +35,11 @@ class VexEnv:
 
     def _build_world(self) -> None:
         self.space, self.field = build_world(self.engine_config)
+        self._update_match_score()
+        for robot in [self.field.robot_red, self.field.robot_blue]:
+            for ball in robot.inventory:
+                ball.body.position = robot.body.position
+        self._update_cache_pose()
 
     def reset(self) -> Dict[str, Any]:
         self._build_world()
@@ -83,6 +88,8 @@ class VexEnv:
         """
         self.field.actions_counter += 1
         action = self._process_policy_action(action)
+        prev_red_score, prev_blue_score = self.field.red_score, self.field.blue_score
+        prev_red_inven, prev_blue_inven = len(self.field.robot_red.inventory), len(self.field.robot_blue.inventory)
         for player in ["robot_red", "robot_blue"]:
             dis_act = action[player][0]
             robot = self.field.robot_red if player == "robot_red" else self.field.robot_blue
@@ -116,11 +123,19 @@ class VexEnv:
         legal_actions = self.legal_action_resolver.get_legal_actions(field=self.field)
         done = self.field.actions_counter >= self.max_actions
         observations = self._get_observations()
+        post_red_score, post_blue_score = self.field.red_score, self.field.blue_score
+        post_red_inven, post_blue_inven = len(self.field.robot_red.inventory), len(self.field.robot_blue.inventory)
+        reward_red, reward_blue = self._get_rewards(
+            prev_red_score, prev_blue_score, prev_red_inven, prev_blue_inven,
+            post_red_score, post_blue_score, post_red_inven, post_blue_inven,
+            done = done
+        )
         return {
             'legal_actions': legal_actions,
             'observations': observations,
             'done': done,
-        } # TODO: also return reward
+            'reward': {'robot_red': reward_red, 'robot_blue': reward_blue}
+        }
 
     def _update_world(self):
         update_world(
@@ -136,7 +151,7 @@ class VexEnv:
         for robot in [self.field.robot_red, self.field.robot_blue]:
             for ball in robot.inventory:
                 ball.body.position = robot.body.position
-        self._cache_ball_positions()
+        self._update_cache_pose()
         
     def _update_match_score(self):
         red_score, blue_score = get_match_score(self.field)
@@ -146,7 +161,36 @@ class VexEnv:
     def _get_observations(self) -> Dict[str, Any]:
         observations = self.observation_encoder.encode(self.field)
         return observations
-        
+    
+    def _get_rewards(
+        self,
+        prev_red_score: int,
+        prev_blue_score: int,
+        prev_red_inven: int,
+        prev_blue_inven: int,
+        post_red_score: int,
+        post_blue_score: int,
+        post_red_inven: int,
+        post_blue_inven: int,
+        done: bool,
+    ):
+        reward_red, reward_blue = 0, 0
+        reward_red += (post_red_score - prev_red_score) * 0.1
+        reward_red += 0.1 if post_red_inven > prev_red_inven else 0 # incentivize pickup
+        reward_blue += (post_blue_score - prev_blue_score) * 0.1
+        reward_blue += 0.1 if post_blue_inven > prev_blue_inven else 0 # incentivize pickup
+        if done:
+            if post_red_score > post_blue_score:
+                reward_red += 2.0
+                score_diff = post_red_score - post_blue_score
+                # bonus for winning by larger margin
+                reward_red += 0.01 * score_diff
+            elif post_blue_score > post_red_score:
+                reward_blue += 2.0
+                score_diff = post_blue_score - post_red_score
+                # bonus for winning by larger margin
+                reward_blue += 0.01 * score_diff
+        return reward_red, reward_blue 
     def _process_policy_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
         new_blue_act = []
         new_blue_act.append(self.env_config.N - 1 - action["robot_blue"][1])
@@ -158,10 +202,11 @@ class VexEnv:
         }
         return new_action
     
-    def _cache_ball_positions(self):
+    def _update_cache_pose(self):
         for ball in self.field.balls:
-            ball._cache_position()
-        
+            ball._update_cache_pose()
+        for robot in [self.field.robot_red, self.field.robot_blue]:
+            robot._update_cache_pose()
         
     def render(self):
         if self.renderer is None:

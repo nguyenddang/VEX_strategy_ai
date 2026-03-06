@@ -14,7 +14,7 @@ def create_space() -> pymunk.Space:
     space.collision_slop = 0.0
     space.idle_speed_threshold = 1.0
     space.sleep_time_threshold = 0.6
-    space.iterations = 8
+    space.iterations = 10
     return space
 
 def step_space(space: pymunk.Space, dt: float) -> None:

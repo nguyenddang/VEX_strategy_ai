@@ -31,6 +31,7 @@ def run_demo(episodes: int = 1) -> None:
     try:
         for _ in range(episodes):
             out = env.reset()
+            cum_reward = {'robot_red': 0.0, 'robot_blue': 0.0}
             while not out["done"]:
                 action = {}
                 legal_actions = out["legal_actions"]
@@ -43,13 +44,16 @@ def run_demo(episodes: int = 1) -> None:
                     move_theta = random.randint(0, env.env_config.K - 1)
                     action[player].extend([move_x, move_y, move_theta])
                 out = env.step(action)
+                cum_reward['robot_red'] += out['reward']['robot_red']
+                cum_reward['robot_blue'] += out['reward']['robot_blue']
     finally:
         env.close()
 
     end_time = time.time()
     print(f"Episode(s) finished in {end_time - start_time:.2f} seconds.")
     print(f"Average time per episode: {(end_time - start_time) / episodes:.2f} seconds.")
-
+    print(f"Red score: {env.field.red_score}, Blue score: {env.field.blue_score}")
+    print(f"Cumulative reward: {cum_reward}")
 
 if __name__ == "__main__":
     run_demo(episodes=1)

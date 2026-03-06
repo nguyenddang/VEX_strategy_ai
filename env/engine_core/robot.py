@@ -55,6 +55,7 @@ class Robot:
         self.arrival_angle_eps = math.radians(robot_config['arrival_angle_eps'])
         self.pickup_ground_completion_dist = robot_config['pickup_ground_completion_dist']
         self.pickup_ground_approach_dist = robot_config['pickup_ground_approach_dist']
+        self.cache_pose = {'position': (self.body.position.x, self.body.position.y), 'angle': self.body.angle}
         
         self._pickup_ball: Ball | None = None
         self._pickup_phase: str | None = None
@@ -63,6 +64,13 @@ class Robot:
         self._building_loader_target: Tuple[Tuple[float, float], float, Loader] | None = None
         self._building_action_phase: str | None = None
         self._building_action_mode: str | None = None
+        
+    def _update_cache_pose(self):
+        body = self.body
+        angle, position = body.angle, body.position
+        self.cache_pose['position'] = (position.x, position.y)
+        self.cache_pose['angle'] = angle
+
 
     def _set_ball_ghost(self, ball: Ball | None, ghost: bool):
         if ball is None:
