@@ -95,7 +95,7 @@ robot:
 ball:
   mass: 0.5 
   radius: 4.1021
-  linear_damping: 0.98
+  linear_damping: 0.99
   angular_damping: 0.99
   stop_speed: 1.0
   stop_angular_speed: 5.0 

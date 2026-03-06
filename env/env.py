@@ -130,6 +130,7 @@ class VexEnv:
             n_render_updates=self.n_render_updates,
             step_space_fn=step_space,
             render_fn=self.render if self.renderer is not None else None,
+            realtime=self.renderer is not None and self.env_config.realtime_render,
         )
         self._update_match_score()
         for robot in [self.field.robot_red, self.field.robot_blue]:

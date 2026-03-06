@@ -23,6 +23,7 @@ def run_demo(episodes: int = 1) -> None:
             inference_hz=5.0,
             max_duration_s=120.0,
             render_hz=30.0,
+            realtime_render=False
         ),
         engine_config=engine_config,
     )
@@ -47,6 +48,7 @@ def run_demo(episodes: int = 1) -> None:
 
     end_time = time.time()
     print(f"Episode(s) finished in {end_time - start_time:.2f} seconds.")
+    print(f"Average time per episode: {(end_time - start_time) / episodes:.2f} seconds.")
 
 
 if __name__ == "__main__":

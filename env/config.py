@@ -6,6 +6,7 @@ class EnvConfig:
     engine_hz: float = 60.0
     inference_hz: float = 5.0
     render_hz: float = 60.0
+    realtime_render: bool = True
     max_duration_s: float = 120.0
     max_offset: float = 30.0 # in cm. max relative MOVE extent in x/y from current robot position.
     N: int = 31 # number of bins per axis for MOVE grid around robot.

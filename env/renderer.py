@@ -21,6 +21,8 @@ class EnvRenderer:
         pygame.init()
         self.field_view_width = env_config.window_width
         self.window_height = env_config.window_height
+        self.inference_hz = env_config.inference_hz
+        self.max_duration_s = env_config.max_duration_s
         self.info_panel_width = max(220, int(self.field_view_width * 0.22))
         self.window_width = self.field_view_width + self.info_panel_width
         self.scale_x = self.field_view_width / engine_config['field']['width']
@@ -69,8 +71,21 @@ class EnvRenderer:
         pygame.draw.rect(self.screen, (235, 235, 235), panel_rect)
         pygame.draw.line(self.screen, (120, 120, 120), (panel_x, 0), (panel_x, self.window_height), 2)
 
-        elapsed_time_s = float(field_dict.get("elapsed_time_s", 0.0))
-        max_duration_s = float(field_dict.get("max_duration_s", 0.0))
+        elapsed_time_s = field_dict.get("elapsed_time_s")
+        if elapsed_time_s is None:
+            actions_counter = int(field_dict.get("actions_counter", 0))
+            elapsed_time_s = actions_counter / self.inference_hz if self.inference_hz > 0 else 0.0
+        else:
+            elapsed_time_s = float(elapsed_time_s)
+
+        max_duration_s = field_dict.get("max_duration_s")
+        if max_duration_s is None:
+            max_duration_s = self.max_duration_s
+        else:
+            max_duration_s = float(max_duration_s)
+
+        if max_duration_s > 0:
+            elapsed_time_s = min(elapsed_time_s, max_duration_s)
 
         elapsed_int = max(0, int(elapsed_time_s))
         max_int = max(0, int(max_duration_s))

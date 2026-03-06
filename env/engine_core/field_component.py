@@ -77,6 +77,9 @@ class Ball:
     def _apply_rolling_resistance(self, body:pymunk.Body, gravity, damping, dt):
         """ Custom damping. to make things look good:)
         """
+        if self.state != "ground":
+            pymunk.Body.update_velocity(body, gravity, damping, dt) 
+            return
         pymunk.Body.update_velocity(body, gravity, self.config['linear_damping'], dt)
         body.angular_velocity *= self.config['angular_damping'] ** dt
         if body.velocity.length < self.config['stop_speed']:

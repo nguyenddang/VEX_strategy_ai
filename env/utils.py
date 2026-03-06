@@ -6,11 +6,15 @@ from env.type import Field
 from typing import Any, Dict, Tuple, Callable
 import pymunk
 import torch 
+import time
 
 def create_space() -> pymunk.Space:
     space = pymunk.Space()
     space.gravity = (0, 0)
     space.collision_slop = 0.0
+    space.idle_speed_threshold = 1.0
+    space.sleep_time_threshold = 0.6
+    space.iterations = 8
     return space
 
 def step_space(space: pymunk.Space, dt: float) -> None:
@@ -91,14 +95,23 @@ def update_world(
     n_render_updates: int,
     step_space_fn: Callable[[Any, float], None],
     render_fn: Callable[[], None] | None = None,
+    realtime: bool = False,
 ) -> None:
     space = field.robot_red.space
+    next_step_wall_time = time.perf_counter()
     for istep in range(n_engine_updates):
+        if realtime:
+            now = time.perf_counter()
+            sleep_for = next_step_wall_time - now
+            if sleep_for > 0.0:
+                time.sleep(sleep_for)
         field.robot_red.update(engine_update_dt)
         field.robot_blue.update(engine_update_dt)
         step_space_fn(space, engine_update_dt)
         if render_fn is not None and istep % n_render_updates == 0:
             render_fn()
+        if realtime:
+            next_step_wall_time += engine_update_dt
             
 def get_match_score(field: Field) -> tuple[int, int]:
     red_total = 0
