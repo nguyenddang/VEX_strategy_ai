@@ -1,12 +1,11 @@
-from env.config import EnvConfig
 from env.engine_core.field_component import Ball, Goal, Loader, Loader_Manager, Leg, Wall
 from env.engine_core.robot import Robot
 from env.type import Field
 
 from typing import Any, Dict, Tuple, Callable
 import pymunk
-import torch 
 import time
+import math 
 
 def create_space() -> pymunk.Space:
     space = pymunk.Space()
@@ -23,7 +22,7 @@ def step_space(space: pymunk.Space, dt: float) -> None:
     for _ in range(substeps):
         space.step(sub_dt)
         
-def build_world(engine_config: Dict[str, Any]) -> Tuple[pymunk.Space, Field]:
+def build_world(engine_config: Dict[str, Any]):
     """Build ... the WORLD. WOAH!
     """
     field_config = engine_config["field"]
@@ -86,6 +85,71 @@ def build_world(engine_config: Dict[str, Any]) -> Tuple[pymunk.Space, Field]:
         actions_counter=0,
     )
     return space, field
+
+def reset_world(space: pymunk.Space, field: Field, engine_config: Dict[str, Any]) -> None:
+    """Reset the world to the initial state. Called at the beginning of each episode.
+    """
+    all_balls = []
+    balls = field.balls
+    for robot in [field.robot_red, field.robot_blue]:
+        robot.body.velocity = (0, 0)
+        robot.body.angular_velocity = 0
+        robot.inventory.clear()
+        robot.clear_action_attempt()
+        robot.body.position = engine_config['robot'][robot.key]['initial_position']
+        robot.body.angle = math.radians(engine_config['robot'][robot.key]['initial_rotation'])
+        for _ in range(2):
+            ball = balls.pop(0)
+            ball.body.position = engine_config['robot'][robot.key]['initial_position']
+            ball.state = "ground"
+            ball.colour = robot.key.split('_')[-1]
+            if ball.shape in space.shapes:
+                space.remove(ball.shape, ball.body)
+            robot.inventory.append(ball)
+            all_balls.append(ball)
+        
+    for goal in field.goals:
+        goal.scored_balls = [None] * goal.capacity
+        goal.relative_stats = {}
+        
+    for loader in field.loaders:
+        loader.relative_stats = {}
+        loader.scored_balls.clear()
+        for i in range(loader.capacity):
+            ball = balls.pop(0)
+            ball.body.position = engine_config['loader'][loader.key]['position']
+            ball.state = loader.key
+            ball.colour = engine_config['loader'][loader.key]['preload'][i]
+            if ball.shape in space.shapes:
+                space.remove(ball.shape, ball.body)
+            loader.scored_balls.append(ball)
+            all_balls.append(ball)
+            
+    for loader in [field.loaders[0], field.loaders[3]]:
+        loader.manager.inventory.clear()
+        loader.manager.left_to_load = 12 
+        for _ in range(12):
+            ball = balls.pop(0)
+            ball.body.position = (-2, -2)
+            ball.state = "N/A"
+            ball.colour = loader.manager.colour
+            if ball.shape in space.shapes:
+                space.remove(ball.shape, ball.body)
+            loader.manager.inventory.append(ball)
+            all_balls.append(ball)
+    
+    for colour in ['red', 'blue']:
+        for position in engine_config['initial_ground_ball_positions'][colour]:
+            ball = balls.pop(0)
+            ball.body.position = position
+            ball.state = "ground"
+            ball.colour = colour
+            if ball.shape not in space.shapes:
+                space.add(ball.shape, ball.body)
+            all_balls.append(ball)
+    field.balls = all_balls
+    print(f"World reset: {len(field.balls)} balls on the field, {len(field.robot_red.inventory)} balls in red robot, {len(field.robot_blue.inventory)} balls in blue robot.")
+    return field
 
 
 def update_world(

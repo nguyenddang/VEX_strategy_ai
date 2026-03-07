@@ -15,16 +15,14 @@ class Robot:
         field_config: Dict[str, Any],
         ball_config: Dict[str, Any],
         ):
-        inital_position = robot_config[key]['initial_position']
-        inital_rotation = robot_config[key]['initial_rotation']
+        self.space = space
         self.body = pymunk.Body(
             mass=robot_config['mass'],
             moment=pymunk.moment_for_box(robot_config['mass'], (robot_config['size'], robot_config['size'])),
             body_type=pymunk.Body.DYNAMIC,
         )
-        self.space = space
-        self.body.position = inital_position
-        self.body.angle = math.radians(inital_rotation)
+        self.body.position = robot_config[key]['initial_position']
+        self.body.angle = math.radians(robot_config[key]['initial_rotation'])
         self.key = key
 
         self.shape = pymunk.Poly.create_box(self.body, size=(robot_config['size'], robot_config['size']))
@@ -39,7 +37,7 @@ class Robot:
             Ball(
                 space=space,
                 ball_config=ball_config,
-                position=inital_position,
+                position=robot_config[key]['initial_position'],
                 colour=key.split('_')[-1],
                 state=key,
                 add_sim=False,
@@ -117,6 +115,8 @@ class Robot:
         self._building_block_target = None
         self._building_loader_target = None
         self._building_action_mode = None
+        self.move_target_pos = None
+        self.move_target_angle = None
 
     def score_goal(self):
         self._pickup_ball = None

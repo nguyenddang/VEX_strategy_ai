@@ -1,7 +1,7 @@
 import pygame
 import pymunk
 import math
-from env.config import EnvConfig
+from config import VexConfig
 from env.type import Field
 INCH_TO_CM = 2.54
 GRID_SPACING_INCH = 3.23
@@ -17,21 +17,23 @@ GOAL_NEUTRAL_COLOUR = (255, 220, 0)
 
 
 class EnvRenderer:
-    def __init__(self, env_config: EnvConfig, engine_config):
+    def __init__(self, config: VexConfig):
         pygame.init()
-        self.field_view_width = env_config.window_width
-        self.window_height = env_config.window_height
-        self.inference_hz = env_config.inference_hz
-        self.max_duration_s = env_config.max_duration_s
+        main_config = config
+        engine_config = main_config.engine_config
+        self.field_view_width = main_config.window_width
+        self.window_height = main_config.window_height
+        self.inference_hz = main_config.inference_hz
+        self.max_duration_s = main_config.max_duration_s
         self.info_panel_width = max(220, int(self.field_view_width * 0.22))
         self.window_width = self.field_view_width + self.info_panel_width
         self.scale_x = self.field_view_width / engine_config['field']['width']
         self.scale_y = self.window_height / engine_config['field']['height']
-        self.pickup_dist_threshold = env_config.ball_pickup_hitbox["dist_threshold"]
-        self.pickup_angle_threshold_rad = env_config.ball_pickup_hitbox["angle_threshold"]
-        self.goal_dist_threshold = env_config.goal_action_hitbox["dist_threshold"]
-        self.goal_angle_threshold_rad = env_config.goal_action_hitbox["angle_threshold"]
-        self.loader_dist_threshold = env_config.loader_pickup_hitbox["dist_threshold"]
+        self.pickup_dist_threshold = main_config.ball_pickup_hitbox["dist_threshold"]
+        self.pickup_angle_threshold_rad = main_config.ball_pickup_hitbox["angle_threshold"]
+        self.goal_dist_threshold = main_config.goal_action_hitbox["dist_threshold"]
+        self.goal_angle_threshold_rad = main_config.goal_action_hitbox["angle_threshold"]
+        self.loader_dist_threshold = main_config.loader_pickup_hitbox["dist_threshold"]
         self.screen = pygame.display.set_mode((self.window_width, self.window_height))
         self.font = pygame.font.SysFont("consolas", 20)
         self._static_field_surface = None

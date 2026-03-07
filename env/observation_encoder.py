@@ -1,15 +1,15 @@
-import time 
-import torch
 from env.type import Field
-from env.config import EnvConfig
-from env.engine_core.utils import normalize_angle
+from config import VexConfig
+
+import torch
+
 import math
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any
 class ObservationEncoder:
-    def __init__(self, env_config: EnvConfig, engine_config: Dict[str, Any]):
-        self.env_config = env_config
-        self.engine_config = engine_config
-        self.max_actions = int(self.env_config.max_duration_s * self.env_config.inference_hz)
+    def __init__(self, config: VexConfig):
+        self.main_config = config
+        self.engine_config = config.engine_config
+        self.max_actions = int(self.main_config.max_duration_s * self.main_config.inference_hz)
         self.ball_state_to_one_hot = {
             "ground": {"red": 0, "blue": 1},
             "long_1": {"red": 2, "blue": 3},
@@ -49,12 +49,12 @@ class ObservationEncoder:
         field_dict = field.to_field_dict()
         observations = {
             'robot_red': {
-                'core': None,
-                'balls': None,
+                'core_obs': None,
+                'ball_obs': None,
             },
             'robot_blue': {
-                'core': None,
-                'balls': None,
+                'core_obs': None,
+                'ball_obs': None,
             }
         }
         red_score, blue_score = field_dict['red_score'], field_dict['blue_score']
@@ -76,9 +76,9 @@ class ObservationEncoder:
             ], dtype=torch.float32)
             goal_loader_obs = self._get_goal_loader_obs(field_dict, robot_key=key)
             core_obs = torch.cat([core_obs, goal_loader_obs], dim=0)
-            observations[key]['core'] = core_obs
+            observations[key]['core_obs'] = core_obs
             ball_obs = self._get_balls_obs(field_dict, robot_key=key)
-            observations[key]['balls'] = ball_obs
+            observations[key]['ball_obs'] = ball_obs
         return observations
 
 

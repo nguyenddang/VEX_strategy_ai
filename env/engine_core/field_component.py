@@ -59,6 +59,9 @@ class Ball:
         self.colour = colour
         self.config = ball_config
         self.state = state
+        self.inital_state = state
+        self.add_sim = add_sim
+        self.inital_position = position
         # init sim
         moment = pymunk.moment_for_circle(ball_config['mass'], 0, ball_config['radius'])
         self.body = pymunk.Body(mass=ball_config['mass'], moment=moment, body_type=pymunk.Body.DYNAMIC)
@@ -412,6 +415,7 @@ class Loader_Manager:
         ]
         self.colour = colour
         self.debug = debug # print debug info for each loading action if True
+        
 
     def fill(self, loader):
         if self.left_to_load <= 0:

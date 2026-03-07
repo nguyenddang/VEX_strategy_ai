@@ -1,5 +1,7 @@
-from typing import Any, Callable, Dict, List
+from typing import Any, Dict, List
 import math
+
+import torch
 from env.engine_core.utils import normalize_angle
 from env.engine_core.field_component import Goal, Loader, Ball
 from env.engine_core.robot import Robot
@@ -103,8 +105,8 @@ class LegalActionResolver:
                     min_dist = relative["distance"] 
         return pickup_ball
     
-    def get_legal_actions(self, field: Field) -> Dict[str, Any]:
-        legal_actions: Dict[str, Any] = {}
+    def get_legal_actions(self, field: Field) -> Dict[str, torch.Tensor]:
+        legal_actions = {}
 
         for robot in [field.robot_red, field.robot_blue]:
             opponent_robot = field.robot_blue if robot.key == "robot_red" else field.robot_red
@@ -120,5 +122,5 @@ class LegalActionResolver:
             robot._building_block_target = block_target
             robot._building_loader_target = loader_target
             robot._pickup_ball = pickup_ball
-            legal_actions[robot.key] = discrete_mask
+            legal_actions[robot.key] = torch.tensor(discrete_mask, dtype=torch.bool)
         return legal_actions

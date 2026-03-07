@@ -8,16 +8,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from env.env import VexEnv
-from env.config import EnvConfig
-import yaml 
-
-engine_config_path = 'env/engine_core/config.yml'
-with open(engine_config_path, 'r') as f:
-    engine_config = yaml.safe_load(f)
+from config import VexConfig
 
 def run_demo(episodes: int = 1) -> None:
     env = VexEnv(
-        EnvConfig(
+        VexConfig(
             render_mode=None,
             engine_hz=60.0,
             inference_hz=5.0,
@@ -25,11 +20,11 @@ def run_demo(episodes: int = 1) -> None:
             render_hz=30.0,
             realtime_render=False
         ),
-        engine_config=engine_config,
     )
     start_time = time.time()
     try:
         for _ in range(episodes):
+            env.reset()
             out = env.reset()
             cum_reward = {'robot_red': 0.0, 'robot_blue': 0.0}
             while not out["done"]:
@@ -39,9 +34,9 @@ def run_demo(episodes: int = 1) -> None:
                 for player in ["robot_red", "robot_blue"]:
                     legal_move = [i for i, valid in enumerate(legal_actions[player]) if valid]
                     action[player] = [random.choice(legal_move)]
-                    move_x = random.randint(0, env.env_config.N - 1)
-                    move_y = random.randint(0, env.env_config.N - 1)
-                    move_theta = random.randint(0, env.env_config.K - 1)
+                    move_x = random.randint(0, env.main_config.N - 1)
+                    move_y = random.randint(0, env.main_config.N - 1)
+                    move_theta = random.randint(0, env.main_config.K - 1)
                     action[player].extend([move_x, move_y, move_theta])
                 out = env.step(action)
                 cum_reward['robot_red'] += out['reward']['robot_red']

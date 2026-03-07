@@ -2,39 +2,40 @@ import time
 from typing import Any, Dict, List
 import math
 
-from env.utils import build_world, update_world, step_space, get_match_score
+from env.utils import build_world, update_world, step_space, get_match_score, reset_world
 from env.legal_actions import LegalActionResolver
-from env.config import EnvConfig
+from config import VexConfig
 from env.observation_encoder import ObservationEncoder
 
 class VexEnv:
-    def __init__(self, env_config: EnvConfig, engine_config: Dict[str, Any]):
-        self.env_config = env_config
-        self.engine_config = engine_config
-        self.observation_encoder = ObservationEncoder(env_config=self.env_config, engine_config=self.engine_config)
+    def __init__(self, config: VexConfig):
+        self.main_config = config
+        self.engine_config = config.engine_config
+        self.observation_encoder = ObservationEncoder(config=config)
         self.legal_action_resolver = LegalActionResolver(
-            goal_action_hitbox=self.env_config.goal_action_hitbox,
-            loader_pickup_hitbox=self.env_config.loader_pickup_hitbox,
-            ball_pickup_hitbox=self.env_config.ball_pickup_hitbox,
+            goal_action_hitbox=self.main_config.goal_action_hitbox,
+            loader_pickup_hitbox=self.main_config.loader_pickup_hitbox,
+            ball_pickup_hitbox=self.main_config.ball_pickup_hitbox,
         )
-        assert self.env_config.engine_hz >= self.env_config.inference_hz, "Engine update frequency should be higher than or equal to inference frequency"
-        assert self.env_config.engine_hz % self.env_config.inference_hz == 0, "Engine update frequency should be divisible by inference frequency"
-        assert self.env_config.render_hz > 0, "Render frequency must be positive"
-        assert self.env_config.N % 2 == 1, "MOVE bins (N) should be odd to have a center bin"
-        self.n_engine_updates = int(self.env_config.engine_hz // self.env_config.inference_hz)
-        self.n_render_updates = max(1, int(self.env_config.engine_hz // self.env_config.render_hz))
-        self.max_actions = int(self.env_config.max_duration_s * self.env_config.inference_hz)
-        self.engine_update_dt = 1.0 / self.env_config.engine_hz
+        self.n_engine_updates = self.main_config.n_engine_updates
+        self.n_render_updates = self.main_config.n_render_updates
+        self.max_actions = self.main_config.max_actions
+        self.engine_update_dt = 1.0 / self.main_config.engine_hz
         self.renderer = None
         self.time_temp = {}
+        self.field = None
 
-        if self.env_config.render_mode == "human":
+        if self.main_config.render_mode == "human":
             from env.renderer import EnvRenderer
-            self.renderer = EnvRenderer(env_config=self.env_config, engine_config=self.engine_config)
+            self.renderer = EnvRenderer(config=config)
         
 
     def _build_world(self) -> None:
-        self.space, self.field = build_world(self.engine_config)
+        if self.field is None:
+            print("Building world...")
+            self.space, self.field = build_world(self.engine_config)
+        else:
+            self.field = reset_world(self.space, self.field, self.engine_config)
         self._update_match_score()
         for robot in [self.field.robot_red, self.field.robot_blue]:
             for ball in robot.inventory:
@@ -53,6 +54,8 @@ class VexEnv:
             'done': done,
             'legal_actions': legal_actions,
             'observations': observations,
+            'reward': {'robot_red': 0.0, 'robot_blue': 0.0},
+            'timestep': 0,
         }
 
     def step(self, action: Dict[str, List[int]]) -> Dict[str, Any]:
@@ -65,7 +68,7 @@ class VexEnv:
             act in a shared red-canonical action space.
 
             Required keys per player:
-            - discrete: action type index [0..5]
+            - discrete: primary action type index [0..5]
             - move_x: MOVE x-bin index [0..N-1]
             - move_y: MOVE y-bin index [0..N-1]
             - move_theta: MOVE heading-bin index [0..K-1]
@@ -100,9 +103,9 @@ class VexEnv:
                 y_idx = action[player][2]
                 theta_idx = action[player][3]
 
-                delta_x = -self.env_config.max_offset + (2.0 * self.env_config.max_offset * x_idx) / (self.env_config.N - 1)
-                delta_y = -self.env_config.max_offset + (2.0 * self.env_config.max_offset * y_idx) / (self.env_config.N - 1)
-                delta_theta = -math.pi + (2.0 * math.pi * (theta_idx + 0.5)) / self.env_config.K
+                delta_x = -self.main_config.max_offset + (2.0 * self.main_config.max_offset * x_idx) / (self.main_config.N - 1)
+                delta_y = -self.main_config.max_offset + (2.0 * self.main_config.max_offset * y_idx) / (self.main_config.N - 1)
+                delta_theta = -math.pi + (2.0 * math.pi * (theta_idx + 0.5)) / self.main_config.K
                 target_x = robot.body.position.x + delta_x
                 target_y = robot.body.position.y + delta_y
                 target_theta = robot.body.angle + delta_theta
@@ -134,7 +137,8 @@ class VexEnv:
             'legal_actions': legal_actions,
             'observations': observations,
             'done': done,
-            'reward': {'robot_red': reward_red, 'robot_blue': reward_blue}
+            'reward': {'robot_red': reward_red, 'robot_blue': reward_blue},
+            'timestep': self.field.actions_counter,
         }
 
     def _update_world(self):
@@ -145,7 +149,7 @@ class VexEnv:
             n_render_updates=self.n_render_updates,
             step_space_fn=step_space,
             render_fn=self.render if self.renderer is not None else None,
-            realtime=self.renderer is not None and self.env_config.realtime_render,
+            realtime=self.renderer is not None and self.main_config.realtime_render,
         )
         self._update_match_score()
         for robot in [self.field.robot_red, self.field.robot_blue]:
@@ -193,8 +197,8 @@ class VexEnv:
         return reward_red, reward_blue 
     def _process_policy_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
         new_blue_act = []
-        new_blue_act.append(self.env_config.N - 1 - action["robot_blue"][1])
-        new_blue_act.append(self.env_config.N - 1 - action["robot_blue"][2])
+        new_blue_act.append(self.main_config.N - 1 - action["robot_blue"][1])
+        new_blue_act.append(self.main_config.N - 1 - action["robot_blue"][2])
         new_blue_act.append(action["robot_blue"][3]) # theta does not need to be rotated, as rotation is symmetric
         new_action = {
             "robot_red": action["robot_red"],
