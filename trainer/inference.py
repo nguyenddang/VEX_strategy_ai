@@ -17,14 +17,14 @@ class InferenceServer:
         buffer: SharedBuffer,
         league: SharedLeague,
         config: VexConfig,
-        device_id: str
     ):
         self.buffer = buffer
         self.league = league
         self.config = config
-        self.device_id = device_id
+        self.device_id = self.config.inference_server_device
 
-        self.model = AgentMLP(self.config).to(self.device_id)
+        self.model = AgentMLP(self.config)
+        self.model.to(self.device_id)
         self.model.eval()
         
         n_model = math.ceil(self.config.n_workers * self.config.latest_ratio + 1) + 5 # addition 10 gives a bit of room in case workers switch back and forth. 

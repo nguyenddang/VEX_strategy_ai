@@ -48,7 +48,7 @@ class AgentMLP(nn.Module):
             "theta_bin_logits": theta_bin_logits, # (B, K)
             "value_logits": value_logits, # (B, 1)
         }
-        if self.inference:
+        if inference:
             return self.inference(out)
         return out
         

@@ -30,6 +30,7 @@ def worker_fn(
             'rewards': torch.zeros((2, config.chunk_size), dtype=torch.float32),
             'values': torch.zeros((2, config.chunk_size + 1), dtype=torch.float32), # +1 for bootstrapping value of last state.
             'move_masks': torch.zeros((2, config.chunk_size), dtype=torch.bool),
+            'log_probs': torch.zeros((2, config.chunk_size), dtype=torch.float32),
         }
     while True:
         zeros_buffer(local_buffer)
@@ -66,7 +67,8 @@ def worker_fn(
                 local_buffer['rewards'][p_idx, idx] = env_out['reward'][robot_key] # use reward for transition s-> s'
                 local_buffer['values'][p_idx, idx].copy_(buffer.temp['values'][worker_id, p_idx])
                 local_buffer['move_masks'][p_idx, idx].copy_(buffer.temp['move_masks'][worker_id, p_idx])
-                            
+                local_buffer['log_probs'][p_idx, idx].copy_(buffer.temp['log_probs'][worker_id, p_idx])
+                
             if (idx + 1) == config.chunk_size and timestep > 0:
                 if not env_out['done']: # if done, do not booststrap and just use 0 as the value of last state.
                     # get bootstrapping value for the last state.

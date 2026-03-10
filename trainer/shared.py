@@ -23,6 +23,7 @@ class SharedBuffer:
             'rewards': torch.zeros((self.buffer_capacity, 2, self.chunk_size), dtype=torch.float32).pin_memory().share_memory_(),
             'values': torch.zeros((self.buffer_capacity, 2, self.chunk_size + 1), dtype=torch.float32).pin_memory().share_memory_(),
             'move_masks': torch.zeros((self.buffer_capacity, 2, self.chunk_size), dtype=torch.bool).pin_memory().share_memory_(),
+            'log_probs': torch.zeros((self.buffer_capacity, 2, self.chunk_size), dtype=torch.float32).pin_memory().share_memory_(),
         }
         
         # Buffer also handles comm between worker and inference gpu. 
@@ -62,7 +63,6 @@ class SharedBuffer:
             idx = self.read_write_queue.get() # block until enough chunks are ready.
             if not self.written_before[idx]:
                 self.read_write_queue.put(idx) # put back if never been written to and sleep a bit
-                time.sleep(0.01)
                 continue
             for key in self.buffer:
                 batch[key].append(self.buffer[key][idx]) 
