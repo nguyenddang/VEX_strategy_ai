@@ -24,7 +24,6 @@ def run_demo(episodes: int = 1) -> None:
     start_time = time.time()
     try:
         for _ in range(episodes):
-            env.reset()
             out = env.reset()
             cum_reward = {'robot_red': 0.0, 'robot_blue': 0.0}
             while not out["done"]:
@@ -51,4 +50,4 @@ def run_demo(episodes: int = 1) -> None:
     print(f"Cumulative reward: {cum_reward}")
 
 if __name__ == "__main__":
-    run_demo(episodes=1)
+    run_demo(episodes=2)

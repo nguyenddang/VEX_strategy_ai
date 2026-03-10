@@ -7,7 +7,7 @@ class VexConfig:
     """
     # ENV Config
     engine_hz: float = 60.0
-    inference_hz: float = 1.0
+    inference_hz: float = 20.0
     render_hz: float = 60.0
     realtime_render: bool = True
     max_duration_s: float = 120.0
@@ -48,10 +48,12 @@ class VexConfig:
     n_workers: int = 2
     buffer_capacity: int = 8192 # can take up 4096 chunks. 
     chunk_size: int = 30 # timesteps per chunk. 
-    batch_size: int = 8192 # timesteps per training batch. 
+    train_batch_size: int = 8192 # timesteps per training batch. 
     inference_batch_size: int = 512 # number of timestep to inference. 
     inference_timeout: float = 0.001 # max wait time for inference batch. 
-    
+    max_league_snapshots: int = 500 
+    latest_ratio: float = 0.8 # ratio of workers to use latest snapshot as opponent. 
+    inference_grace_period: int = 4 # number of batches to wait before deleting inactive snapshot in inference server.
     
     
     def __post_init__(self):
@@ -59,6 +61,7 @@ class VexConfig:
         assert self.engine_hz % self.inference_hz == 0, "Engine update frequency should be divisible by inference frequency"
         assert self.render_hz > 0, "Render frequency must be positive"
         assert self.N % 2 == 1, "MOVE bins (N) should be odd to have a center bin"
+        assert 0.5<= self.latest_ratio <= 0.9, "latest_ratio should be between 0.5 and 0.9 to ensure enough diversity in opponents." 
         self.max_actions = int(self.max_duration_s * self.inference_hz)
         self.n_engine_updates = int(self.engine_hz // self.inference_hz)
         self.n_render_updates = max(1, int(self.engine_hz // self.render_hz))

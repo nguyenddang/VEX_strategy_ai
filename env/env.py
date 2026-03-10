@@ -36,6 +36,7 @@ class VexEnv:
             self.space, self.field = build_world(self.engine_config)
         else:
             self.field = reset_world(self.space, self.field, self.engine_config)
+        # self.space, self.field = build_world(self.engine_config)
         self._update_match_score()
         for robot in [self.field.robot_red, self.field.robot_blue]:
             for ball in robot.inventory:
@@ -56,6 +57,7 @@ class VexEnv:
             'observations': observations,
             'reward': {'robot_red': 0.0, 'robot_blue': 0.0},
             'timestep': 0,
+            'score': {'robot_red': self.field.red_score, 'robot_blue': self.field.blue_score},
         }
 
     def step(self, action: Dict[str, List[int]]) -> Dict[str, Any]:
@@ -139,6 +141,7 @@ class VexEnv:
             'done': done,
             'reward': {'robot_red': reward_red, 'robot_blue': reward_blue},
             'timestep': self.field.actions_counter,
+            'score': {'robot_red': post_red_score, 'robot_blue': post_blue_score},
         }
 
     def _update_world(self):

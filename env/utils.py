@@ -101,7 +101,7 @@ def reset_world(space: pymunk.Space, field: Field, engine_config: Dict[str, Any]
         for _ in range(2):
             ball = balls.pop(0)
             ball.body.position = engine_config['robot'][robot.key]['initial_position']
-            ball.state = "ground"
+            ball.state = robot.key
             ball.colour = robot.key.split('_')[-1]
             if ball.shape in space.shapes:
                 space.remove(ball.shape, ball.body)
@@ -148,6 +148,7 @@ def reset_world(space: pymunk.Space, field: Field, engine_config: Dict[str, Any]
                 space.add(ball.shape, ball.body)
             all_balls.append(ball)
     field.balls = all_balls
+    field.actions_counter = 0
     print(f"World reset: {len(field.balls)} balls on the field, {len(field.robot_red.inventory)} balls in red robot, {len(field.robot_blue.inventory)} balls in blue robot.")
     return field
 

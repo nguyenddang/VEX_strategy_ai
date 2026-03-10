@@ -28,7 +28,7 @@ class AgentMLP(nn.Module):
         
         print(f"Total number of parameters: {sum(p.numel() for p in self.parameters()) / 1e6:.2f}M")
     
-    def forward(self, core_obs, ball_obs, legal_action_mask=None):
+    def forward(self, core_obs, ball_obs, legal_action_mask=None, inference=False):
         # core_obs: (B, core_obs_dim).
         # ball_obs: (B, n_ball, ball_obs_dim)
         core_embed = self.core_encoder(core_obs) # (B, ndim//2)
@@ -41,16 +41,18 @@ class AgentMLP(nn.Module):
         if legal_action_mask is not None:
             primary_action_logits = primary_action_logits.masked_fill(legal_action_mask == 0, float("-inf"))
             
-        return {
+        out = {
             "primary_action_logits": primary_action_logits, # (B, n_primary_actions)
             "x_bin_logits": x_bin_logits, # (B, N)
             "y_bin_logits": y_bin_logits, # (B, N)
             "theta_bin_logits": theta_bin_logits, # (B, K)
             "value_logits": value_logits, # (B, 1)
         }
+        if self.inference:
+            return self.inference(out)
+        return out
         
-    def inference(self, core_obs, ball_obs, legal_action_mask=None):
-        outputs = self.forward(core_obs, ball_obs, legal_action_mask)
+    def inference(self, outputs):
         p_dist = Categorical(logits=outputs["primary_action_logits"])
         x_dist = Categorical(logits=outputs["x_bin_logits"])
         y_dist = Categorical(logits=outputs["y_bin_logits"])
