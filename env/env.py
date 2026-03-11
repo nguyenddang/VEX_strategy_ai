@@ -114,12 +114,16 @@ class VexEnv:
                 robot.set_motion_target((target_x, target_y), target_theta)
             elif dis_act == 2: # PICKUP LOADERS
                 robot.pickup_loader()
+                # print(f"{player} attempts to pickup loader at timestep {self.field.actions_counter}")
             elif dis_act == 3: # PICKUP GROUND
                 robot.pickup_ground()
+                # print(f"{player} attempts to pickup ground ball at timestep {self.field.actions_counter}")
             elif dis_act == 4: # SCORE
                 robot.score_goal()
+                # print(f"{player} attempts to score at timestep {self.field.actions_counter}")
             elif dis_act == 5: # BLOCK
                 robot.block_goal()
+                # print(f"{player} attempts to block at timestep {self.field.actions_counter}")
         
         self._update_world()
         for player in ["red", "blue"]:

@@ -137,8 +137,8 @@ class Trainer:
             norm = torch.nn.utils.clip_grad_norm_(self.learner.parameters(), max_norm=1.0)
             self.optimizer.step()
             self.optimizer.zero_grad()
-
-            print(f"Step {step}: Loss {loss.item():.4f}, Policy Loss {policy_loss.item():.4f}, Value Loss {value_loss.item():.4f}, Entropy Bonus {entropy_bonus.item():.4f}, Grad Norm {norm:.4f}")
+            if step % 10 == 0:
+                print(f"Step {step}: Loss {loss.item():.8f}, Policy Loss {policy_loss.item():.8f}, Value Loss {value_loss.item():.8f}, Entropy Bonus {entropy_bonus.item():.8f}, Grad Norm {norm:.8f}")
 
     def train(self):
         iteration = 0

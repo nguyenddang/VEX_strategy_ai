@@ -59,6 +59,7 @@ def worker_fn(
                 'robot_red': buffer.temp['actions'][worker_id, 0].tolist(),
                 'robot_blue': buffer.temp['actions'][worker_id, 1].tolist(),
             }
+            # print(f"Worker {worker_id} timestep {timestep}: action {actions}, reward {rewards}, done {done}")
             env_out = env.step(actions)
             
             # collect results and update local_buffer
@@ -68,7 +69,7 @@ def worker_fn(
                 local_buffer['values'][p_idx, idx].copy_(buffer.temp['values'][worker_id, p_idx])
                 local_buffer['move_masks'][p_idx, idx].copy_(buffer.temp['move_masks'][worker_id, p_idx])
                 local_buffer['log_probs'][p_idx, idx].copy_(buffer.temp['log_probs'][worker_id, p_idx])
-                
+
             if (idx + 1) == config.chunk_size and timestep > 0:
                 if not env_out['done']: # if done, do not booststrap and just use 0 as the value of last state.
                     # get bootstrapping value for the last state.

@@ -7,7 +7,7 @@ class VexConfig:
     """
     # ENV Config
     engine_hz: float = 60.0
-    inference_hz: float = 20.0
+    inference_hz: float = 5.0
     render_hz: float = 60.0
     realtime_render: bool = True
     max_duration_s: float = 120.0

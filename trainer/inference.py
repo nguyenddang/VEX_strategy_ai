@@ -102,6 +102,7 @@ class InferenceServer:
         wids, slots, unique_slots, core_obs_batch, ball_obs_batch, legal_masks_batch = self.gather_prep(active_workers)
         # check if learner has been updated
         if self.league.learner_updated_event.is_set():
+            print(f"Learner updated, refreshing learner weights on inference server.")
             with self.league.learner_lock:
                 self.learner_param.copy_(self.league.learner_param, non_blocking=True)
             self.league.learner_updated_event.clear()
@@ -113,10 +114,10 @@ class InferenceServer:
             (core_obs_batch[:, 0], ball_obs_batch[:, 0], legal_masks_batch[:, 0], True)
         )
         # save to temp
-        self.buffer.temp['actions'][wids, 0].copy_(red_out['action'], non_blocking=True)
-        self.buffer.temp['log_probs'][wids, 0].copy_(red_out['log_prob'], non_blocking=True)
-        self.buffer.temp['values'][wids, 0].copy_(red_out['value'], non_blocking=True)
-        self.buffer.temp['move_masks'][wids, 0].copy_(red_out['move_mask'], non_blocking=True)
+        self.buffer.temp['actions'][wids, 0] = red_out['action'].to("cpu", non_blocking=True)
+        self.buffer.temp['log_probs'][wids, 0] = red_out['log_prob'].to("cpu", non_blocking=True)
+        self.buffer.temp['values'][wids, 0] = red_out['value'].to("cpu", non_blocking=True)
+        self.buffer.temp['move_masks'][wids, 0] = red_out['move_mask'].to("cpu", non_blocking=True)
         for slot_idx in unique_slots:
             slot_mask = (slots == slot_idx)
             if slot_mask.sum() == 0:
@@ -127,10 +128,10 @@ class InferenceServer:
                     self.model, 
                     opp_weights, 
                     (core_obs_batch[slot_mask][:, 1], ball_obs_batch[slot_mask][:, 1], legal_masks_batch[slot_mask][:, 1], True))
-            self.buffer.temp['actions'][wids[slot_mask]][:, 1].copy_(blue_out['action'], non_blocking=True)
-            self.buffer.temp['log_probs'][wids[slot_mask]][:, 1].copy_(blue_out['log_prob'], non_blocking=True)
-            self.buffer.temp['values'][wids[slot_mask]][:, 1].copy_(blue_out['value'], non_blocking=True)
-            self.buffer.temp['move_masks'][wids[slot_mask]][:, 1].copy_(blue_out['move_mask'], non_blocking=True)
+            self.buffer.temp['actions'][wids[slot_mask]][:, 1] = blue_out['action'].to("cpu", non_blocking=True)
+            self.buffer.temp['log_probs'][wids[slot_mask]][:, 1] = blue_out['log_prob'].to("cpu", non_blocking=True)
+            self.buffer.temp['values'][wids[slot_mask]][:, 1] = blue_out['value'].to("cpu", non_blocking=True)
+            self.buffer.temp['move_masks'][wids[slot_mask]][:, 1] = blue_out['move_mask'].to("cpu", non_blocking=True)
             
     
         
