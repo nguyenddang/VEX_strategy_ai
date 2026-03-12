@@ -55,7 +55,6 @@ class VexConfig:
     latest_ratio: float = 0.8 # ratio of workers to use latest snapshot as opponent. 
     inference_grace_period: int = 4 # number of batches to wait before deleting inactive snapshot in inference server.
 
-
     steps_per_iteration: int = 32
     inference_server_device: str = 'cuda:1'
     train_device: str = 'cuda:0'
@@ -71,6 +70,9 @@ class VexConfig:
     policy_epsilon: float = 0.2
     value_coef: float = 1.0
     entropy_coef: float = 0.01
+
+    # TRANSFORMER
+    p_embd: int = 16
     
     def __post_init__(self):
         assert self.engine_hz >= self.inference_hz, "Engine update frequency should be higher than or equal to inference frequency"

@@ -120,6 +120,8 @@ class Trainer:
                 y_prob = y_dist.log_prob(actions[:, 2])
                 theta_prob = theta_dist.log_prob(actions[:, 3])
 
+                print("actions", actions[:, 0].max(), actions[:, 0].min())
+
                 new_log_probs = p_prob + move_masks * (x_prob + y_prob + theta_prob)
                 ratios = torch.exp(new_log_probs - log_probs)
 
@@ -137,8 +139,8 @@ class Trainer:
             norm = torch.nn.utils.clip_grad_norm_(self.learner.parameters(), max_norm=1.0)
             self.optimizer.step()
             self.optimizer.zero_grad()
-            if step % 10 == 0:
-                print(f"Step {step}: Loss {loss.item():.8f}, Policy Loss {policy_loss.item():.8f}, Value Loss {value_loss.item():.8f}, Entropy Bonus {entropy_bonus.item():.8f}, Grad Norm {norm:.8f}")
+            # if step % 10 == 0:
+            #     print(f"Step {step}: Loss {loss.item():.8f}, Policy Loss {policy_loss.item():.8f}, Value Loss {value_loss.item():.8f}, Entropy Bonus {entropy_bonus.item():.8f}, Grad Norm {norm:.8f}")
 
     def train(self):
         iteration = 0
@@ -149,4 +151,10 @@ class Trainer:
             if iteration % self.update_league == 0 and iteration > 0:
                 print(f"Updating league at iteration {iteration}")
                 self.league.update_latest_snapshot(self.learner)
+
+                self.save_model(iteration)
             iteration += 1
+
+    def save_model(self, iteration):
+        torch.save(self.learner.state_dict(), f"model_{iteration}.pt")
+        print(f"Model saved at iteration {iteration}")

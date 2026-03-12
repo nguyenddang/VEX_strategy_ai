@@ -76,9 +76,33 @@ class AgentMLP(nn.Module):
             'value': outputs["value_logits"].squeeze(-1), # (B)
             'move_mask': move_mask,
         }
-        
+    
 
-        
-        
-        
-        
+"""
+Global:
+- match time: 1
+- score diff: 1
+- controls: 4
+Learner:
+- position x, and y: 2
+- orientation cos and sin: 2
+- inventory: 1
+- past action: 1 -> n_embd
+- score: 1
+- legal actions: 6
+Opponent:
+- position x, and y: 2
+- orientation cos and sin: 2
+- score: 1
+Each ball:
+- position x, and y: 2
+- relative distance (dx, dy, dist): 3
+- color: 1
+Ball types: 88 -> + n_embd
+"""
+
+class GeniusFormer(nn.Module):
+    def __init__(self, config: VexConfig):
+        super().__init__()
+        self.p_embd = nn.Embedding(8, config.p_embd)
+        self.s_embd = nn.Embedding()

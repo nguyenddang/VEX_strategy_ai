@@ -217,10 +217,10 @@ class EnvRenderer:
             self.screen = static_surface
             self._draw_grid()
             self._draw_wall(field_dict["wall"])
-            self._draw_goal(field_dict["CGL"])
-            self._draw_goal(field_dict["CGU"])
-            self._draw_goal(field_dict["LG1"])
-            self._draw_goal(field_dict["LG2"])
+            self._draw_goal(field_dict["center_lower"])
+            self._draw_goal(field_dict["center_upper"])
+            self._draw_goal(field_dict["long_1"])
+            self._draw_goal(field_dict["long_2"])
             for loader in field_dict.get("loaders", []):
                 self._draw_goal(loader)
             if SHOW_REGION:
@@ -232,7 +232,7 @@ class EnvRenderer:
         self._static_field_surface = static_surface
 
     def _get_scored_balls_signature(self, field_dict):
-        goals = [field_dict["CGL"], field_dict["CGU"], field_dict["LG1"], field_dict["LG2"]]
+        goals = [field_dict["center_lower"], field_dict["center_upper"], field_dict["long_1"], field_dict["long_2"]]
         signature = []
         for goal in goals:
             goal_slots = []
@@ -250,10 +250,10 @@ class EnvRenderer:
             return
 
         scored_surface = pygame.Surface((self.window_width, self.window_height), pygame.SRCALPHA)
-        self._draw_scored_balls(field_dict["CGL"], scored_surface)
-        self._draw_scored_balls(field_dict["CGU"], scored_surface)
-        self._draw_scored_balls(field_dict["LG1"], scored_surface)
-        self._draw_scored_balls(field_dict["LG2"], scored_surface)
+        self._draw_scored_balls(field_dict["center_lower"], scored_surface)
+        self._draw_scored_balls(field_dict["center_upper"], scored_surface)
+        self._draw_scored_balls(field_dict["long_1"], scored_surface)
+        self._draw_scored_balls(field_dict["long_2"], scored_surface)
         self._scored_balls_surface = scored_surface
         self._scored_balls_signature = scored_signature
 
@@ -318,7 +318,7 @@ class EnvRenderer:
         self.screen.blit(overlay, (0, 0))
 
     def _draw_score_regions(self, field_dict):
-        goals = [field_dict["CGL"], field_dict["CGU"], field_dict["LG1"], field_dict["LG2"]]
+        goals = [field_dict["center_lower"], field_dict["center_upper"], field_dict["long_1"], field_dict["long_2"]]
         radius_px = max(1, int(self.goal_dist_threshold * self.scale_x))
         overlay = pygame.Surface((self.window_width, self.window_height), pygame.SRCALPHA)
 
