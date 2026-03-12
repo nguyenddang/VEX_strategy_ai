@@ -7,6 +7,7 @@ from env.legal_actions import LegalActionResolver
 from config import VexConfig
 from env.observation_encoder import ObservationEncoder
 
+import torch 
 class VexEnv:
     def __init__(self, config: VexConfig):
         self.main_config = config
@@ -60,7 +61,7 @@ class VexEnv:
             'score': {'robot_red': self.field.red_score, 'robot_blue': self.field.blue_score},
         }
 
-    def step(self, action: Dict[str, List[int]]) -> Dict[str, Any]:
+    def step(self, action: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """Step env
 
         Args:
@@ -204,11 +205,11 @@ class VexEnv:
         return reward_red, reward_blue 
     def _process_policy_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
         new_blue_act = []
-        new_blue_act.append(self.main_config.N - 1 - action["robot_blue"][1])
-        new_blue_act.append(self.main_config.N - 1 - action["robot_blue"][2])
-        new_blue_act.append(action["robot_blue"][3]) # theta does not need to be rotated, as rotation is symmetric
+        new_blue_act.append(self.main_config.N - 1 - action["robot_blue"][1].item())
+        new_blue_act.append(self.main_config.N - 1 - action["robot_blue"][2].item())
+        new_blue_act.append(action["robot_blue"][3].item()) # theta does not need to be rotated, as rotation is symmetric
         new_action = {
-            "robot_red": action["robot_red"],
+            "robot_red": action["robot_red"].tolist(),
             "robot_blue": [action["robot_blue"][0]] + new_blue_act
         }
         return new_action

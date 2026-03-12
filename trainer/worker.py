@@ -11,7 +11,7 @@ def zeros_buffer(buffer: Dict[str, torch.Tensor]):
     for key in buffer:
         buffer[key].zero_()
 
-
+import time 
 @torch.no_grad()
 def worker_fn(
     worker_id, 
@@ -33,9 +33,11 @@ def worker_fn(
             'log_probs': torch.zeros((2, config.chunk_size), dtype=torch.float32),
         }
     while True:
+        waiting_time = 0
+        step_time = 0
+        start_time = time.time()
         zeros_buffer(local_buffer)
         opp_idx, param_version, p, q, n_snapshots = league.sample_opponent(worker_id)
-        print(f"Worker {worker_id} playing {opp_idx} version {param_version}")
         env_out = env.reset()
         done, legal_actions, observations, rewards, timestep = \
             env_out['done'], env_out['legal_actions'], env_out['observations'], env_out['reward'], env_out['timestep']
@@ -51,16 +53,24 @@ def worker_fn(
                 local_buffer['legal_masks'][p_idx, idx].copy_(legal_actions[robot_key])
             # inference 
             buffer.inference_queue.put((worker_id, opp_idx, param_version)) # request to inference gpu. 
+            start_wait = time.time()
             buffer.res_events[worker_id].wait()
             buffer.res_events[worker_id].clear() 
+            end_wait = time.time()
+            waiting_time += (end_wait - start_wait)
             
+            assert buffer.temp['actions'][worker_id].dtype == torch.long
+            assert buffer.temp['actions'][worker_id][:, 0].min() >= 0 and buffer.temp['actions'][worker_id][:, 0].max() < 6, f"Invalid primary action {buffer.temp['actions'][worker_id][:, 0]}"
 
             actions = {
                 'robot_red': buffer.temp['actions'][worker_id, 0].tolist(),
                 'robot_blue': buffer.temp['actions'][worker_id, 1].tolist(),
             }
             # print(f"Worker {worker_id} timestep {timestep}: action {actions}, reward {rewards}, done {done}")
+            start_step = time.time()
             env_out = env.step(actions)
+            end_step = time.time()
+            step_time += (end_step - start_step)
             
             # collect results and update local_buffer
             for p_idx, robot_key in enumerate(['robot_red', 'robot_blue']):
@@ -97,4 +107,18 @@ def worker_fn(
                 if env_out['score']['robot_red'] > env_out['score']['robot_blue']:
                     new_q = q - delta
                     league.update_quality(opp_idx, param_version, new_q) # learner won, decrease opponent quality.
+                end_time = time.time()
+                dt = end_time - start_time
+                if worker_id == 0:
+                    copy_time = dt - waiting_time - step_time
+                    print(f"Worker {worker_id} finished episode in {end_time - start_time:.2f}s, waiting time {waiting_time:.2f}s, copy time {copy_time:.2f}s, step_time {step_time:.2f}s, score {env_out['score']}")
                 
+                
+def worker_decentralized_fn(
+    worker_id, 
+    buffer: SharedBuffer,
+    league: SharedLeague,
+    config: VexConfig,
+):
+    # this worker has its own copy of the models. don't inference gpu server. 
+    pass 

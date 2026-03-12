@@ -52,6 +52,7 @@ class AgentMLP(nn.Module):
             return self.inference(out)
         return out
         
+    @torch.no_grad()
     def inference(self, outputs):
         p_dist = Categorical(logits=outputs["primary_action_logits"])
         x_dist = Categorical(logits=outputs["x_bin_logits"])
@@ -63,7 +64,6 @@ class AgentMLP(nn.Module):
         y_act = y_dist.sample() # (B)
         theta_act = theta_dist.sample() # (B)
         act = torch.stack([p_act, x_act, y_act, theta_act], dim=-1) # (B, 4)
-        
         p_prob = p_dist.log_prob(p_act) # (B)
         x_prob = x_dist.log_prob(x_act) # (B)
         y_prob = y_dist.log_prob(y_act) # (B)

@@ -1,13 +1,17 @@
 from config import VexConfig
+
+from model.model import AgentMLP
+
 from trainer.shared import SharedBuffer, SharedLeague
 from trainer.inference import InferenceServer
-from model.model import AgentMLP
 from trainer.worker import worker_fn
+
 from torch.distributions import Categorical
 import torch.nn.functional as F
 import torch.multiprocessing as mp
-
 import torch
+
+import time 
 
 class Trainer:
     def __init__(self, config: VexConfig):
@@ -22,6 +26,7 @@ class Trainer:
         self.ball_obs_dim = config.ball_obs_dim
         self.n_balls = config.n_balls
         self.n_primary_actions = config.n_primary_actions
+        self.train_batch_size = config.train_batch_size
 
         # gae config
         self.gamma = config.gamma
@@ -34,17 +39,19 @@ class Trainer:
         self.value_coef = config.value_coef
 
         # init model, shared buffer, league, and inference server.
-        self.manager = mp.Manager()
         self.learner = AgentMLP(config)
-        self.learner.to(self.train_device)
-        self.buffer = SharedBuffer(config, self.manager)
-        self.league = SharedLeague(config, self.manager)
+        self.buffer = SharedBuffer(config)
+        self.league = SharedLeague(config)
         self.inference_server = InferenceServer(self.buffer, self.league, config)
     
         self.league.update_learner_param(self.learner)
+        self.league.update_latest_snapshot(self.learner)
 
         # init optimizer
         self.optimizer = torch.optim.Adam(self.learner.parameters(), lr=config.lr)
+        
+        # misc
+        self.last_produced = 0
 
         # start processes
         self.processes = []
@@ -56,6 +63,9 @@ class Trainer:
             p = mp.Process(target=worker_fn, args=(worker_id, self.buffer, self.league, config))
             p.start()
             self.processes.append(p)
+        
+        self.learner.to(self.train_device)
+
 
     def _get_advantage(self, rewards: torch.Tensor, values: torch.Tensor):
         """
@@ -92,8 +102,10 @@ class Trainer:
 
     def _train_iteration(self):
         for step in range(self.steps_per_iteration):
-            batch = self.buffer.pull_from_buffer()
-
+            # DEBUG: Sleep for 1s then continue 
+            # batch = self.buffer.pull_from_buffer()
+            time.sleep(0.05)
+            continue
             core_obs = batch['core_obs'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1, self.core_obs_dim) # B * 2 * chunk_size, core_obs_dim
             ball_obs = batch['ball_obs'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1, self.n_balls, self.ball_obs_dim) # B * 2 * chunk_size, n_balls, ball_obs_dim
             legal_masks = batch['legal_masks'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1, self.n_primary_actions) # B * 2 * chunk_size, n_primary_actions
@@ -114,7 +126,8 @@ class Trainer:
                 x_dist = Categorical(logits=outputs["x_bin_logits"])
                 y_dist = Categorical(logits=outputs["y_bin_logits"])
                 theta_dist = Categorical(logits=outputs["theta_bin_logits"])
-
+                assert actions[:, 0].dtype == torch.long
+                assert actions[:, 0].min() >= 0 and actions[:, 0].max() < 6
                 p_prob = p_dist.log_prob(actions[:, 0])
                 x_prob = x_dist.log_prob(actions[:, 1])
                 y_prob = y_dist.log_prob(actions[:, 2])
@@ -137,16 +150,34 @@ class Trainer:
             norm = torch.nn.utils.clip_grad_norm_(self.learner.parameters(), max_norm=1.0)
             self.optimizer.step()
             self.optimizer.zero_grad()
-            if step % 10 == 0:
-                print(f"Step {step}: Loss {loss.item():.8f}, Policy Loss {policy_loss.item():.8f}, Value Loss {value_loss.item():.8f}, Entropy Bonus {entropy_bonus.item():.8f}, Grad Norm {norm:.8f}")
+            print(f"Step {step}: Loss {loss.item():.4f}, Policy Loss {policy_loss.item():.4f}, Value Loss {value_loss.item():.4f}, Entropy Bonus {entropy_bonus.item():.4f}, Grad Norm {norm:.4f}")
 
     def train(self):
         iteration = 0
         while True:
             print(f"Starting iteration {iteration}")
+            start_time = time.time()
             self._train_iteration()
             self.league.update_learner_param(self.learner)
             if iteration % self.update_league == 0 and iteration > 0:
                 print(f"Updating league at iteration {iteration}")
                 self.league.update_latest_snapshot(self.learner)
             iteration += 1
+            # torch.cuda.synchronize()
+            end_time = time.time()
+            # Logging. 
+            # long sample reuse = (samples per batch * batches per second) / (samples buffer intake per second)
+            dt = end_time - start_time
+            self.get_sample_reuse(dt, iteration)
+
+    def get_sample_reuse(self, dt, iteration):
+        with self.buffer.sample_read_lock:
+            produced = self.buffer.sample_produced.value
+        sample_trained_per_sec = self.train_batch_size * self.steps_per_iteration / dt
+        sample_produced_per_sec = (produced - self.last_produced) / dt
+        self.last_produced = produced
+        if sample_produced_per_sec == 0:
+            return float('inf')
+        sample_reuse = sample_trained_per_sec / sample_produced_per_sec
+        print(f"[TRAINER] Iteration: {iteration}, Sample Trained/sec: {sample_trained_per_sec:.2f}, Sample Produced/sec: {sample_produced_per_sec:.2f}, Sample Reuse: {sample_reuse:.2f}")
+        

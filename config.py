@@ -6,7 +6,7 @@ class VexConfig:
     """Config for this entire repo.
     """
     # ENV Config
-    engine_hz: float = 60.0
+    engine_hz: float = 50.0
     inference_hz: float = 5.0
     render_hz: float = 60.0
     realtime_render: bool = True
@@ -46,17 +46,16 @@ class VexConfig:
     
     # TRAINER
     n_workers: int = 2
-    buffer_capacity: int = 8192 # can take up 4096 chunks. 
+    buffer_capacity: int = 8192 
     chunk_size: int = 32 # timesteps per chunk. 
-    train_batch_size: int = 8192 # timesteps per training batch. 
-    inference_batch_size: int = 512 # number of timestep to inference. 
+    train_batch_size: int = 8192 * 4 # timesteps per training batch. 
+    inference_batch_size: int = 32 # number of timestep to inference. 
     inference_timeout: float = 0.001 # max wait time for inference batch. 
-    max_league_snapshots: int = 500 
+    max_league_snapshots: int = 1000 
     latest_ratio: float = 0.8 # ratio of workers to use latest snapshot as opponent. 
-    inference_grace_period: int = 4 # number of batches to wait before deleting inactive snapshot in inference server.
 
 
-    steps_per_iteration: int = 32
+    steps_per_iteration: int = 16
     inference_server_device: str = 'cuda:1'
     train_device: str = 'cuda:0'
     lr: float = 1e-4
@@ -70,7 +69,7 @@ class VexConfig:
     value_epsilon: float = 0.2
     policy_epsilon: float = 0.2
     value_coef: float = 1.0
-    entropy_coef: float = 0.01
+    entropy_coef: float = 0.001
     
     def __post_init__(self):
         assert self.engine_hz >= self.inference_hz, "Engine update frequency should be higher than or equal to inference frequency"

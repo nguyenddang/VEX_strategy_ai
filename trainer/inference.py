@@ -23,6 +23,8 @@ class InferenceServer:
         self.config = config
         self.device_id = self.config.inference_server_device
 
+    
+    def first_init(self):
         self.model = AgentMLP(self.config)
         self.model.to(self.device_id)
         self.model.eval()
@@ -40,7 +42,7 @@ class InferenceServer:
     def run(self):
         torch.set_num_threads(1)
         print(f"Inference server started on device {self.device_id}.")
-        
+        self.first_init()
         while True:
             active_workers = []
             start_time = time.perf_counter()
@@ -53,9 +55,10 @@ class InferenceServer:
                     break
             if len(active_workers) == 0:
                 continue
+            # print(f"[SERVER] Recieved {len(active_workers)} inference requests. Processing...")
         
             self.forward_batch(active_workers)
-            torch.cuda.synchronize(self.device_id) # make sure all gpu operations are done before signaling workers.
+            # torch.cuda.synchronize(self.device_id) # make sure all gpu operations are done before signaling workers.
             for w_req in active_workers:
                 self.buffer.res_events[w_req[0]].set()
             
