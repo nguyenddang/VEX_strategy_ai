@@ -56,12 +56,12 @@ class VexEnv:
             'done': done,
             'legal_actions': legal_actions,
             'observations': observations,
-            'reward': {'robot_red': 0.0, 'robot_blue': 0.0},
+            'rewards': {'robot_red': 0.0, 'robot_blue': 0.0},
             'timestep': 0,
             'score': {'robot_red': self.field.red_score, 'robot_blue': self.field.blue_score},
         }
 
-    def step(self, action: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+    def step(self, action: Dict[str, List[int]]) -> Dict[str, Any]:
         """Step env
 
         Args:
@@ -144,7 +144,7 @@ class VexEnv:
             'legal_actions': legal_actions,
             'observations': observations,
             'done': done,
-            'reward': {'robot_red': reward_red, 'robot_blue': reward_blue},
+            'rewards': {'robot_red': reward_red, 'robot_blue': reward_blue},
             'timestep': self.field.actions_counter,
             'score': {'robot_red': post_red_score, 'robot_blue': post_blue_score},
         }
@@ -205,11 +205,11 @@ class VexEnv:
         return reward_red, reward_blue 
     def _process_policy_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
         new_blue_act = []
-        new_blue_act.append(self.main_config.N - 1 - action["robot_blue"][1].item())
-        new_blue_act.append(self.main_config.N - 1 - action["robot_blue"][2].item())
-        new_blue_act.append(action["robot_blue"][3].item()) # theta does not need to be rotated, as rotation is symmetric
+        new_blue_act.append(self.main_config.N - 1 - action["robot_blue"][1])
+        new_blue_act.append(self.main_config.N - 1 - action["robot_blue"][2])
+        new_blue_act.append(action["robot_blue"][3]) # theta does not need to be rotated, as rotation is symmetric
         new_action = {
-            "robot_red": action["robot_red"].tolist(),
+            "robot_red": action["robot_red"],
             "robot_blue": [action["robot_blue"][0]] + new_blue_act
         }
         return new_action

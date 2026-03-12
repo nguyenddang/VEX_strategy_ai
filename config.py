@@ -43,6 +43,7 @@ class VexConfig:
     
     # AGENT Config
     ndim: int = 128 
+    block_size: int = 32
     
     # TRAINER
     n_workers: int = 2
@@ -53,7 +54,6 @@ class VexConfig:
     inference_timeout: float = 0.001 # max wait time for inference batch. 
     max_league_snapshots: int = 1000 
     latest_ratio: float = 0.8 # ratio of workers to use latest snapshot as opponent. 
-
 
     steps_per_iteration: int = 16
     inference_server_device: str = 'cuda:1'

@@ -71,9 +71,9 @@ class AgentMLP(nn.Module):
         move_mask = (p_act == 1) # only when primary action is MOVE, the x/y/theta bins matter.
         log_prob = p_prob + move_mask * (x_prob + y_prob + theta_prob) # (B)
         return {
-            'action': act,
+            'actions': act,
             'log_prob': log_prob,
-            'value': outputs["value_logits"].squeeze(-1), # (B)
+            'values': outputs["value_logits"].squeeze(-1), # (B)
             'move_mask': move_mask,
         }
         

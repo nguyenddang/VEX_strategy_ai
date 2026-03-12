@@ -6,119 +6,99 @@ from env.env import VexEnv
 
 from typing import Dict
 
+from model.model import AgentMLP
+
         
 def zeros_buffer(buffer: Dict[str, torch.Tensor]):
     for key in buffer:
         buffer[key].zero_()
 
-import time 
-@torch.no_grad()
-def worker_fn(
-    worker_id, 
-    buffer: SharedBuffer,
-    league: SharedLeague,
-    config: VexConfig,
-):
-    torch.set_num_threads(1)
-    env = VexEnv(config)
-    print(f"Worker {worker_id} started.")
-    local_buffer = {
-            'core_obs': torch.zeros((2, config.chunk_size, config.core_obs_dim), dtype=torch.float32),
-            'ball_obs': torch.zeros((2, config.chunk_size, config.n_balls, config.ball_obs_dim), dtype=torch.float32),
-            'legal_masks': torch.zeros((2, config.chunk_size, config.n_primary_actions), dtype=torch.bool),
-            'actions': torch.zeros((2, config.chunk_size, 4), dtype=torch.long),
-            'rewards': torch.zeros((2, config.chunk_size), dtype=torch.float32),
-            'values': torch.zeros((2, config.chunk_size + 1), dtype=torch.float32), # +1 for bootstrapping value of last state.
-            'move_masks': torch.zeros((2, config.chunk_size), dtype=torch.bool),
-            'log_probs': torch.zeros((2, config.chunk_size), dtype=torch.float32),
-        }
-    while True:
-        waiting_time = 0
-        step_time = 0
-        start_time = time.time()
-        zeros_buffer(local_buffer)
-        opp_idx, param_version, p, q, n_snapshots = league.sample_opponent(worker_id)
-        env_out = env.reset()
-        done, legal_actions, observations, rewards, timestep = \
-            env_out['done'], env_out['legal_actions'], env_out['observations'], env_out['reward'], env_out['timestep']
-        while not done:
-            idx = timestep % config.chunk_size
-            # copy to slots for inference and update part of local buffer.
-            for p_idx, robot_key in enumerate(['robot_red', 'robot_blue']):
-                buffer.temp['core_obs'][worker_id, p_idx].copy_(observations[robot_key]['core_obs'])
-                buffer.temp['ball_obs'][worker_id, p_idx].copy_(observations[robot_key]['ball_obs'])
-                buffer.temp['legal_masks'][worker_id, p_idx].copy_(legal_actions[robot_key])
-                local_buffer['core_obs'][p_idx, idx].copy_(observations[robot_key]['core_obs'])
-                local_buffer['ball_obs'][p_idx, idx].copy_(observations[robot_key]['ball_obs'])
-                local_buffer['legal_masks'][p_idx, idx].copy_(legal_actions[robot_key])
-            # inference 
-            buffer.inference_queue.put((worker_id, opp_idx, param_version)) # request to inference gpu. 
-            start_wait = time.time()
-            buffer.res_events[worker_id].wait()
-            buffer.res_events[worker_id].clear() 
-            end_wait = time.time()
-            waiting_time += (end_wait - start_wait)
-            
-            assert buffer.temp['actions'][worker_id].dtype == torch.long
-            assert buffer.temp['actions'][worker_id][:, 0].min() >= 0 and buffer.temp['actions'][worker_id][:, 0].max() < 6, f"Invalid primary action {buffer.temp['actions'][worker_id][:, 0]}"
-
-            actions = {
-                'robot_red': buffer.temp['actions'][worker_id, 0].tolist(),
-                'robot_blue': buffer.temp['actions'][worker_id, 1].tolist(),
-            }
-            # print(f"Worker {worker_id} timestep {timestep}: action {actions}, reward {rewards}, done {done}")
-            start_step = time.time()
-            env_out = env.step(actions)
-            end_step = time.time()
-            step_time += (end_step - start_step)
-            
-            # collect results and update local_buffer
-            for p_idx, robot_key in enumerate(['robot_red', 'robot_blue']):
-                local_buffer['actions'][p_idx, idx].copy_(buffer.temp['actions'][worker_id, p_idx])
-                local_buffer['rewards'][p_idx, idx] = env_out['reward'][robot_key] # use reward for transition s-> s'
-                local_buffer['values'][p_idx, idx].copy_(buffer.temp['values'][worker_id, p_idx])
-                local_buffer['move_masks'][p_idx, idx].copy_(buffer.temp['move_masks'][worker_id, p_idx])
-                local_buffer['log_probs'][p_idx, idx].copy_(buffer.temp['log_probs'][worker_id, p_idx])
-
-            if (idx + 1) == config.chunk_size and timestep > 0:
-                if not env_out['done']: # if done, do not booststrap and just use 0 as the value of last state.
-                    # get bootstrapping value for the last state.
-                    for p_idx, robot_key in enumerate(['robot_red', 'robot_blue']):
-                        buffer.temp['core_obs'][worker_id, p_idx].copy_(env_out['observations'][robot_key]['core_obs'])
-                        buffer.temp['ball_obs'][worker_id, p_idx].copy_(env_out['observations'][robot_key]['ball_obs'])
-                        buffer.temp['legal_masks'][worker_id, p_idx].copy_(env_out['legal_actions'][robot_key])
-                    buffer.inference_queue.put((worker_id, opp_idx, param_version)) # request to inference gpu. 
-                    buffer.res_events[worker_id].wait()
-                    buffer.res_events[worker_id].clear() 
-                    # copy bootstrapping value to local buffer.
-                    for p_idx in range(2):
-                        local_buffer['values'][p_idx, -1].copy_(buffer.temp['values'][worker_id, p_idx])
-                # reset local buffer and push to shared buffer.
-                buffer.push_to_buffer(local_buffer)
-                zeros_buffer(local_buffer)
-            
-            done, legal_actions, observations, rewards, timestep = \
-                env_out['done'], env_out['legal_actions'], env_out['observations'], env_out['reward'], env_out['timestep']
-            
-            if done: 
-                # update new quality to buffer. 
-                # refer to Eq 14 Appendix N of Dota 2 paper.
-                delta = 0.01 / (p * n_snapshots)
-                if env_out['score']['robot_red'] > env_out['score']['robot_blue']:
-                    new_q = q - delta
-                    league.update_quality(opp_idx, param_version, new_q) # learner won, decrease opponent quality.
-                end_time = time.time()
-                dt = end_time - start_time
-                if worker_id == 0:
-                    copy_time = dt - waiting_time - step_time
-                    print(f"Worker {worker_id} finished episode in {end_time - start_time:.2f}s, waiting time {waiting_time:.2f}s, copy time {copy_time:.2f}s, step_time {step_time:.2f}s, score {env_out['score']}")
-                
-                
 def worker_decentralized_fn(
     worker_id, 
     buffer: SharedBuffer,
     league: SharedLeague,
     config: VexConfig,
 ):
-    # this worker has its own copy of the models. don't inference gpu server. 
-    pass 
+    # decentralized: worker has its own copy of learner and opponent. 
+    torch.set_num_threads(1)
+    env = VexEnv(config)
+    opponent_model = AgentMLP(config)
+    learner_model = AgentMLP(config)
+    learner_model.eval()
+    opponent_model.eval() 
+    worker_learner_version = league.learner_version.value
+    local_buffer = {
+        'core_obs': torch.zeros((2, config.max_actions, config.core_obs_dim), dtype=torch.float32),
+        'ball_obs': torch.zeros((2, config.max_actions, config.n_balls, config.ball_obs_dim), dtype=torch.float32),
+        'legal_masks': torch.zeros((2, config.max_actions, config.n_primary_actions), dtype=torch.bool),
+        'rewards': torch.zeros((2, config.max_actions), dtype=torch.float32),
+        'actions': torch.zeros((2, config.max_actions, 4), dtype=torch.long),
+        'values': torch.zeros((2, config.max_actions + 1), dtype=torch.float32),
+        'move_masks': torch.zeros((2, config.max_actions), dtype=torch.bool),
+        'log_probs': torch.zeros((2, config.max_actions), dtype=torch.float32),
+    }
+    print(f"Worker {worker_id} started.")
+    while True:
+        opp_idx, p, n, param = league.sample_opponent(worker_id)
+        torch.nn.utils.vector_to_parameters(param, opponent_model.parameters())
+        zeros_buffer(local_buffer)
+        env_out = env.reset()
+        done, legal_actions, observations, rewards, timestep = \
+            env_out['done'], env_out['legal_actions'], env_out['observations'], env_out['rewards'], env_out['timestep']
+        while not done:
+            for p_idx, robot_key in enumerate(['robot_red', 'robot_blue']):
+                local_buffer['core_obs'][p_idx, timestep].copy_(observations[robot_key]['core_obs'])
+                local_buffer['ball_obs'][p_idx, timestep].copy_(observations[robot_key]['ball_obs'])
+                local_buffer['legal_masks'][p_idx, timestep].copy_(legal_actions[robot_key]['legal_mask'])
+            with torch.no_grad():
+                # check if learner has been updated. If yes, pull 
+                with league.learner_lock:
+                    if league.learner_version.value != worker_learner_version:
+                        torch.nn.utils.vector_to_parameters(league.learner_param, learner_model.parameters())
+                        worker_learner_version = league.learner_version.value
+                # learner inference: 
+                from_idx = max(0, timestep - config.block_size)
+                learner_out = learner_model(
+                    local_buffer['core_obs'][:, from_idx:timestep + 1],
+                    local_buffer['ball_obs'][:, from_idx:timestep + 1],
+                    local_buffer['legal_masks'][:, from_idx:timestep + 1],
+                    local_buffer['actions'][:, from_idx:timestep + 1],
+                    inference=True)
+                opponent_out = opponent_model(
+                    local_buffer['core_obs'][1, from_idx:timestep + 1],
+                    local_buffer['ball_obs'][1, from_idx:timestep + 1],
+                    local_buffer['legal_masks'][1, from_idx:timestep + 1],
+                    local_buffer['actions'][1, from_idx:timestep + 1],
+                    inference=True
+                )
+            # copy outputs to local buffer 
+            local_buffer['actions'][0, timestep] = learner_out['actions'][0]
+            local_buffer['actions'][1, timestep] = opponent_out['actions']
+            local_buffer['values'][:, timestep] = learner_out['values']
+            local_buffer['move_masks'][0, timestep] = learner_out['move_mask'][0]
+            local_buffer['move_masks'][1, timestep] = opponent_out['move_mask']
+            local_buffer['log_probs'][0, timestep] = learner_out['log_prob'][0]
+            local_buffer['log_probs'][1, timestep] = opponent_out['log_prob']
+            act = {
+                'robot_red': learner_out['actions'][0].tolist(),
+                'robot_blue': learner_out['actions'].tolist()
+            }
+            env_out = env.step(act)
+            # save reward
+            local_buffer['rewards'][0, timestep] = env_out['rewards']['robot_red']
+            local_buffer['rewards'][1, timestep] = env_out['rewards']['robot_blue']
+        
+        delta = 0.01/(n * p)
+        league.update_quality(opp_idx, delta)
+        buffer.push_to_buffer(local_buffer)
+        
+                    
+            
+                
+                
+                
+            
+        
+        
+        
+    
