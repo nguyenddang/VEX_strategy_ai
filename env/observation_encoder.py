@@ -197,7 +197,7 @@ class ObservationEncoder:
             - dx_norm, dy_norm: relative position to robot normalized by field dimension
             - dist_norm: normalized distance to robot
             - heading_err_sin, heading_err_cos: sin and cos of heading error to robot
-            - one_hot_state (19): return 1 number. 
+            - one_hot_state (21): return 1 number. 
                 - 0, 1: ground red, blue
                 - 2, 3: bottom long red, blue
                 - 4, 5: upper long red, blue

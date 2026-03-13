@@ -33,6 +33,8 @@ class SharedBuffer:
             
         # track producer-consumer speed.
         self.sample_produced = mp.Value('l', 0)
+        
+    @torch.no_grad()
     def push_to_buffer(self, data_chunk: Dict[str, torch.Tensor]):
         # called by worker to push a chunk of data to the buffer.
         # ensure workers cannot write to the same slot at the same time. 
@@ -97,7 +99,7 @@ class SharedLeague:
             self.opp_qualities[replace_idx] = new_quality
             self.latest_opp_idx.value = replace_idx
             self.opp_bank[replace_idx].copy_(param)
-            self.opp_bank[replace_idx] = True
+            self.opp_just_updated[replace_idx] = True
             
     def update_learner_param(self, model: AgentMLP):
         param = torch.nn.utils.parameters_to_vector(model.parameters()).detach().cpu()
