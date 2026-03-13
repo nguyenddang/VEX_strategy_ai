@@ -11,7 +11,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from env.env import VexEnv
 from config import VexConfig
-
+from model.model import AgentMLP
+import torch 
+config = VexConfig()
+model = AgentMLP(config)
+RANDOM_ACTION = False
 def run_demo(episodes: int = 1) -> None:
     config = VexConfig()
     config.render_mode = None
@@ -49,7 +53,6 @@ def run_demo(episodes: int = 1) -> None:
             print(f"Episode(s) finished in {end_time - start_time:.2f} seconds.")
             print(f"Red score: {env.field.red_score}, Blue score: {env.field.blue_score}")
             print(f"Cumulative reward: {cum_reward}")
-
     finally:
         env.close()
 if __name__ == "__main__":

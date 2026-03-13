@@ -7,6 +7,7 @@ from env.legal_actions import LegalActionResolver
 from config import VexConfig
 from env.observation_encoder import ObservationEncoder
 
+import torch 
 class VexEnv:
     def __init__(self, config: VexConfig):
         self.main_config = config
@@ -55,7 +56,7 @@ class VexEnv:
             'done': done,
             'legal_actions': legal_actions,
             'observations': observations,
-            'reward': {'robot_red': 0.0, 'robot_blue': 0.0},
+            'rewards': {'robot_red': 0.0, 'robot_blue': 0.0},
             'timestep': 0,
             'score': {'robot_red': self.field.red_score, 'robot_blue': self.field.blue_score},
         }
@@ -143,7 +144,7 @@ class VexEnv:
             'legal_actions': legal_actions,
             'observations': observations,
             'done': done,
-            'reward': {'robot_red': reward_red, 'robot_blue': reward_blue},
+            'rewards': {'robot_red': reward_red, 'robot_blue': reward_blue},
             'timestep': self.field.actions_counter,
             'score': {'robot_red': post_red_score, 'robot_blue': post_blue_score},
         }
@@ -202,6 +203,7 @@ class VexEnv:
                 # bonus for winning by larger margin
                 reward_blue += 0.01 * score_diff
         return reward_red, reward_blue 
+    
     def _process_policy_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
         new_blue_act = []
         new_blue_act.append(self.main_config.N - 1 - action["robot_blue"][1])

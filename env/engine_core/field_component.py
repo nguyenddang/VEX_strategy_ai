@@ -84,12 +84,7 @@ class Ball:
             pymunk.Body.update_velocity(body, gravity, damping, dt) 
             return
         pymunk.Body.update_velocity(body, gravity, self.config['linear_damping'], dt)
-        # body.angular_velocity *= self.config['angular_damping'] ** dt
-        # if body.velocity.length < self.config['stop_speed']:
-        #     body.velocity = (0, 0)
-        # if abs(body.angular_velocity) < self.stop_angular_speed:
-        #     body.angular_velocity = 0
-            
+
     def update_relative_to_robot(self, robot):
         """Calculate relative distance and angle to each robot for observation.
         """
