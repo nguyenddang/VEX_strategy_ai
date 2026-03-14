@@ -1,56 +1,93 @@
 from config import VexConfig
 import torch 
 import torch.nn as nn
+import torch.nn.functional as F
 
 
-class CausalSelfAttention(nn.Module):
-
+class Attention(nn.Module):
     def __init__(self, config: VexConfig):
         super().__init__()
-        assert config.ndim % config.nhead == 0
-        self.c_attn = nn.Linear(config.ndim, 3 * config.ndim, bias=config.bias)
-        self.c_proj = nn.Linear(config.ndim, config.ndim, bias=config.bias)
-        self.attn_dropout = nn.Dropout(config.dropout)
-        self.resid_dropout = nn.Dropout(config.dropout)
-        self.nhead = config.nhead
-        self.ndim = config.ndim
-        self.dropout = config.dropout
-    def forward(self, x, attn_mask=None):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
-        q, k, v  = self.c_attn(x).split(self.ndim, dim=2)
-        k = k.view(B, T, self.nhead, C // self.nhead).transpose(1, 2) # (B, nh, T, hs)
-        q = q.view(B, T, self.nhead, C // self.nhead).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.nhead, C // self.nhead).transpose(1, 2) # (B, nh, T, hs)
-        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=self.dropout if self.training else 0, is_causal=True if attn_mask is None else False)
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
-        y = self.resid_dropout(self.c_proj(y))
+        self.config = config
+        self.qkv = nn.Linear(config.n_embd, config.n_embd * 3)
+        self.proj = nn.Linear(config.n_embd, config.n_embd)
+
+        self.k_cache = None
+        self.v_cache = None
+
+    def kv_cache(self, k, v):
+        if self.k_cache is None and self.v_cache is None:
+            self.k_cache = k
+            self.v_cache = v
+        else:
+            self.k_cache = torch.cat([self.k_cache, k], dim=2)[:, :, -self.config.block_size:, :]
+            self.v_cache = torch.cat([self.v_cache, v], dim=2)[:, :, -self.config.block_size:, :]
+        return self.k_cache, self.v_cache
+
+
+    # x: B, T, n_embd
+    # padding_mask: timesteps, T
+    def forward(self, x, attn_mask):
+        B, T, C = x.shape
+        qkv = self.qkv(x)
+        q, k, v = torch.split(qkv, self.config.n_embd, dim=-1)
+        assert C // self.config.n_head > 0, f"Embedding dimension {C} is not divisible by number of heads {self.config.n_head}"
+        q = q.view(B, T, self.config.n_head, C // self.config.n_head).transpose(1, 2) # (B, n_head, T, head_dim)
+        k = k.view(B, T, self.config.n_head, C // self.config.n_head).transpose(1, 2) # (B, n_head, T, head_dim)
+        v = v.view(B, T, self.config.n_head, C // self.config.n_head).transpose(1, 2) # (B, n_head, T, head_dim)
+
+        if not self.training:
+            k, v = self.kv_cache(k, v)
+
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=attn_mask is None, attn_mask=attn_mask)
+        y = y.transpose(1, 2).contiguous().view(B, T, C)
+        y = self.proj(y)
+        
         return y
     
-class MLP(nn.Module):
-
-    def __init__(self, config: VexConfig):
-        super().__init__()
-        self.c_fc = nn.Linear(config.ndim, 4 * config.ndim, bias=config.bias)
-        self.c_proj = nn.Linear(4 * config.ndim, config.ndim, bias=config.bias)
-        self.dropout = nn.Dropout(config.dropout)
-
-    def forward(self, x):
-        x = self.c_fc(x)
-        x = torch.nn.functional.gelu(x)
-        x = self.c_proj(x)
-        x = self.dropout(x)
-        return x
-    
 class Block(nn.Module):
-    
     def __init__(self, config: VexConfig):
         super().__init__()
-        self.ln_1 = nn.LayerNorm(config.ndim)
-        self.attn = CausalSelfAttention(config)
-        self.ln_2 = nn.LayerNorm(config.ndim)
-        self.mlp = MLP(config)
-
-    def forward(self, x, attn_mask=None):
+        self.ln_1 = nn.LayerNorm(config.n_embd)
+        self.attn = Attention(config)
+        self.ln_2 = nn.LayerNorm(config.n_embd)
+        self.mlp = nn.Sequential(
+            nn.Linear(config.n_embd, config.n_embd * 4),
+            nn.GELU(),
+            nn.Linear(config.n_embd * 4, config.n_embd))
+    
+    # B, T, n_embd
+    def forward(self, x, attn_mask): 
         x = x + self.attn(self.ln_1(x), attn_mask=attn_mask)
         x = x + self.mlp(self.ln_2(x))
         return x
+    
+class Transformer(nn.Module):
+    def __init__(self, config: VexConfig):
+        super().__init__()
+        self.config = config
+
+        self.transformers = nn.ModuleDict(dict(
+            wpe = nn.Embedding(config.block_size, config.n_embd),
+            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+            ln_f = nn.LayerNorm(config.n_embd), 
+        ))
+
+        self.policy_head = nn.Linear(config.n_embd, config.n_primary_actions + config.N*2 + config.K)
+        self.value_head = nn.Linear(config.n_embd, 1)
+
+    
+    # B, T, n_embd
+    def forward(self, x, attn_mask):
+        B, T, C = x.size()
+        positions = torch.arange(T, device=x.device) # (1, T)
+        position_embd = self.transformers.wpe(positions) # (1, T, n_embd)
+        x = x + position_embd # (B, T, n_embd)
+
+        for block in self.transformers.h:
+            x = block(x, attn_mask=attn_mask)
+        
+        x = self.transformers.ln_f(x) # (B, T, n_embd)
+        x = x[:, -1, :]
+        policy_logits = self.policy_head(x) # (B, T, action_size)
+        value_logits = self.value_head(x) # (B, T, 1)
+        return policy_logits, value_logits

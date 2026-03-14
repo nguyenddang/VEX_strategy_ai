@@ -4,14 +4,15 @@ import torch.multiprocessing as mp
 from config import VexConfig
 from typing import Dict
 
-from model.model import AgentMLP
+from model.model import GeniusFormer
 import time
+import random 
 
 class SharedBuffer:
     def __init__(self, config: VexConfig):
         self.buffer_capacity = config.buffer_capacity
         self.max_actions = config.max_actions
-        self.train_batch_size = config.train_batch_size
+        self.mini_train_episodes = config.mini_train_episodes
         # 2 for red/blue robot. 
         # values: max_actions + 1 for bootstrapping value of last state.
         self.buffer = {
@@ -23,6 +24,7 @@ class SharedBuffer:
             'values': torch.zeros((self.buffer_capacity, 2, self.max_actions + 1), dtype=torch.float32).share_memory_(),
             'move_masks': torch.zeros((self.buffer_capacity, 2, self.max_actions), dtype=torch.bool).share_memory_(),
             'log_probs': torch.zeros((self.buffer_capacity, 2, self.max_actions), dtype=torch.float32).share_memory_(),
+            'learner_versions': torch.zeros((self.buffer_capacity, self.max_actions), dtype=torch.float32).share_memory_(), 
         }
         
         self.read_write_queue = mp.Queue() # worker pull from queue to write, trainer gpu pull from queue to read. ensures no overlapping write/read.
@@ -49,10 +51,13 @@ class SharedBuffer:
     def pull_from_buffer(self):
         # called by trainer gpu to pull a batch of data from the buffer.
         batch = {k: [] for k in self.buffer}
-        n_chunks = self.train_batch_size // self.max_actions
-        while torch.sum(self.written_before) < n_chunks:
-            time.sleep(0.01) # wait until enough chunks are written by workers.
-        while len(batch['core_obs']) < n_chunks:
+        while torch.sum(self.written_before) < self.mini_train_episodes:
+            time.sleep(0.01) # wait until enough episodes are written by workers.
+        while len(batch['core_obs']) < self.mini_train_episodes:
+            rand_skip = random.randint(0, 3)
+            for _ in range(rand_skip):
+                idx = self.read_write_queue.get()
+                self.read_write_queue.put(idx)
             idx = self.read_write_queue.get() # block until enough chunks are ready.
             if not self.written_before[idx]:
                 self.read_write_queue.put(idx) # put back if never been written to and sleep a bit
@@ -71,7 +76,7 @@ class SharedLeague:
         self.latest_ratio = config.latest_ratio
         self.n_workers = config.n_workers
         
-        local_model = AgentMLP(config)
+        local_model = GeniusFormer(config)
         total_params = sum(p.numel() for p in local_model.parameters())
         del local_model
         self.latest_opp_idx = mp.Value('i', -1) # index of the latest snapshot in the bank.
@@ -81,12 +86,12 @@ class SharedLeague:
         self.opp_lock = mp.Lock()
         
         self.learner_param = torch.zeros((total_params,), dtype=torch.float32).share_memory_()
-        self.learner_version = mp.Value('i', 0)
+        self.learner_version = mp.Value('i', -1)
         self.learner_lock = mp.Lock()
         
-    def update_latest_snapshot(self, model: AgentMLP):
+    def update_latest_snapshot(self, model: GeniusFormer):
         # push newest snapshot into the bank. 
-        # called by trainer gpu after each iteration (every config.steps_per_iteration) 
+        # called by trainer gpu after each n (every config.steps_per_iteration) 
         param = torch.nn.utils.parameters_to_vector(model.parameters()).detach().cpu()
         with self.opp_lock:
             if self.latest_opp_idx.value == -1:
@@ -101,7 +106,7 @@ class SharedLeague:
             self.opp_bank[replace_idx].copy_(param)
             self.opp_just_updated[replace_idx] = True
             
-    def update_learner_param(self, model: AgentMLP):
+    def update_learner_param(self, model: GeniusFormer):
         param = torch.nn.utils.parameters_to_vector(model.parameters()).detach().cpu()
         with self.learner_lock:
             self.learner_param.copy_(param)
@@ -131,8 +136,23 @@ class SharedLeague:
             if not self.opp_just_updated[opponent_idx]:
                 self.opp_qualities[opponent_idx] -= delta
 
-        
-        
-            
-        
+    def state_dict(self):
+        return {
+            "latest_opp_idx": self.latest_opp_idx.value,
+            "opp_bank": self.opp_bank.clone(),
+            "opp_qualities": self.opp_qualities.clone(),
+            "opp_just_updated": self.opp_just_updated.clone(),
+            "learner_param": self.learner_param.clone(),
+            "learner_version": self.learner_version.value
+        }
+    
+    def load_state_dict(self, state_dict):
+        with self.opp_lock:
+            self.latest_opp_idx.value = state_dict["latest_opp_idx"]
+            self.opp_bank.copy_(state_dict["opp_bank"])
+            self.opp_qualities.copy_(state_dict["opp_qualities"])
+            self.opp_just_updated.copy_(state_dict["opp_just_updated"])
+        with self.learner_lock:
+            self.learner_param.copy_(state_dict["learner_param"])
+            self.learner_version.value = state_dict["learner_version"]
             

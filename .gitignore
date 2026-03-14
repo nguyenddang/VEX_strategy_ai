@@ -10,3 +10,6 @@ wheels/
 .venv
 
 *.pt
+wandb/
+*.out
+checkpoints/

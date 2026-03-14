@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 import math 
 import yaml
+import os
 @dataclass
 class VexConfig:
     """Config for this entire repo.
@@ -46,17 +48,14 @@ class VexConfig:
     block_size: int = 32
     
     # TRAINER
-    n_workers: int = 2
-    buffer_capacity: int = 8192 
-    chunk_size: int = 32 # timesteps per chunk. 
-    train_batch_size: int = 8192 * 4 # timesteps per training batch. 
-    inference_batch_size: int = 32 # number of timestep to inference. 
-    inference_timeout: float = 0.001 # max wait time for inference batch. 
+    n_workers: int = 56
+    buffer_capacity: int = 128 
+    train_episodes: int = 32 # timesteps per training batch. 
+    mini_train_episodes: int = 16
     max_league_snapshots: int = 1000 
     latest_ratio: float = 0.8 # ratio of workers to use latest snapshot as opponent. 
 
-    steps_per_iteration: int = 16
-    inference_server_device: str = 'cuda:1'
+    steps_per_iteration: int = 8
     train_device: str = 'cuda:0'
     lr: float = 1e-4
     update_league: int = 10
@@ -72,7 +71,8 @@ class VexConfig:
     entropy_coef: float = 0.001
 
     # TRANSFORMER
-    n_embd: int = 64
+    compile=True
+    n_embd: int = 128
     n_layer: int = 4
     action_size: int = 4
     n_head: int = 4
@@ -80,7 +80,21 @@ class VexConfig:
     core_obs_dim: int = 85
     n_balls: int = 88
     ball_obs_dim: int = 28
-    total_timestep: int = 100
+    total_timesteps: int = 100
+
+    # LOGGING
+    log_wandb: bool = False
+    wandb_project: str = "vex-geniusformer-forever"
+    wandb_run_name: str = "strategy_without_TS"
+
+    # SAVING CKPTS
+    save_ckpt_path: str = "checkpoints"
+    n_save_learner_ckpts: int = 500
+    n_save_all_ckpts: int = 50
+
+    # LOADING CKPT
+    load_ckpt_path: str | None = None
+    resume_training: bool = False
     
     def __post_init__(self):
         assert self.engine_hz >= self.inference_hz, "Engine update frequency should be higher than or equal to inference frequency"
@@ -89,6 +103,7 @@ class VexConfig:
         assert self.N % 2 == 1, "MOVE bins (N) should be odd to have a center bin"
         assert 0.5<= self.latest_ratio <= 0.9, "latest_ratio should be between 0.5 and 0.9 to ensure enough diversity in opponents." 
         self.max_actions = int(self.max_duration_s * self.inference_hz)
+        self.total_timesteps = self.max_actions
         self.n_engine_updates = int(self.engine_hz // self.inference_hz)
         self.n_render_updates = max(1, int(self.engine_hz // self.render_hz))
         engine_config_path = 'env/engine_core/config.yml'
@@ -96,3 +111,5 @@ class VexConfig:
             engine_config = yaml.safe_load(f)
         self.engine_config = engine_config
 
+        # creating ckpt directory if not exist
+        os.makedirs(self.save_ckpt_path, exist_ok=True)

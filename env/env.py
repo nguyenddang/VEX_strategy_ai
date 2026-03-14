@@ -33,7 +33,6 @@ class VexEnv:
 
     def _build_world(self) -> None:
         if self.field is None:
-            print("Building world...")
             self.space, self.field = build_world(self.engine_config)
         else:
             self.field = reset_world(self.space, self.field, self.engine_config)
@@ -202,6 +201,10 @@ class VexEnv:
                 score_diff = post_blue_score - post_red_score
                 # bonus for winning by larger margin
                 reward_blue += 0.01 * score_diff
+
+        temp = reward_red
+        reward_red = reward_red - reward_blue
+        reward_blue = reward_blue - temp
         return reward_red, reward_blue 
     
     def _process_policy_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
