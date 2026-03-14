@@ -103,6 +103,7 @@ def reset_world(space: pymunk.Space, field: Field, engine_config: Dict[str, Any]
             ball.body.position = engine_config['robot'][robot.key]['initial_position']
             ball.state = robot.key
             ball.colour = robot.key.split('_')[-1]
+            ball.loader_level = -1.0
             if ball.shape in space.shapes:
                 space.remove(ball.shape, ball.body)
             robot.inventory.append(ball)
@@ -120,6 +121,7 @@ def reset_world(space: pymunk.Space, field: Field, engine_config: Dict[str, Any]
             ball.body.position = engine_config['loader'][loader.key]['position']
             ball.state = loader.key
             ball.colour = engine_config['loader'][loader.key]['preload'][i]
+            ball.loader_level = i / (loader.capacity -  1)
             if ball.shape in space.shapes:
                 space.remove(ball.shape, ball.body)
             loader.scored_balls.append(ball)
@@ -133,6 +135,7 @@ def reset_world(space: pymunk.Space, field: Field, engine_config: Dict[str, Any]
             ball.body.position = (-2, -2)
             ball.state = "N/A"
             ball.colour = loader.manager.colour
+            ball.loader_level = -1.0
             if ball.shape in space.shapes:
                 space.remove(ball.shape, ball.body)
             loader.manager.inventory.append(ball)
@@ -144,6 +147,7 @@ def reset_world(space: pymunk.Space, field: Field, engine_config: Dict[str, Any]
             ball.body.position = position
             ball.state = "ground"
             ball.colour = colour
+            loader.level = -1.0
             if ball.shape not in space.shapes:
                 space.add(ball.shape, ball.body)
             all_balls.append(ball)

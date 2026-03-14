@@ -30,6 +30,7 @@ class Trainer:
         self.n_balls = config.n_balls
         self.n_primary_actions = config.n_primary_actions
         self.train_episodes = config.train_episodes
+        self.mini_train_episodes = config.mini_train_episodes
         self.max_actions = config.max_actions
         self.total_timesteps = config.total_timesteps
         self.block_size = config.block_size
@@ -53,6 +54,7 @@ class Trainer:
         # init model, shared buffer, league, and inference server.
         self.unoptimzed_learner = None
         self.learner = GeniusFormer(config)
+        self.learner.train()
         self.buffer = SharedBuffer(config)
         self.league = SharedLeague(config)
 
@@ -139,21 +141,23 @@ class Trainer:
             "n_scoring": 0.0,
             "n_pickup_loaders": 0.0,
             "n_pickup_ground": 0.0,
-            "n_block": 0.0
+            "n_block": 0.0,
+            "red_score": 0.0,
         }
 
         for step in range(self.steps_per_iteration):
             for g_step in range(self.grad_accumulation_steps):
                 batch = self.buffer.pull_from_buffer()
-                core_obs = batch['core_obs'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1, self.total_timesteps, self.core_obs_dim) # B * 2, total_timesteps, core_obs_dim
-                ball_obs = batch['ball_obs'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1, self.total_timesteps, self.n_balls, self.ball_obs_dim) # B * 2, total_timesteps, n_balls, ball_obs_dim
-                legal_masks = batch['legal_masks'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1, self.n_primary_actions) # B * 2 * total_timesteps, n_primary_actions
-                actions = batch['actions'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1, 4)
-                rewards = batch['rewards'].pin_memory().to(self.train_device, non_blocking=True).contiguous()
+                core_obs = batch['core_obs'].pin_memory().to(self.train_device, non_blocking=True).view(-1, self.total_timesteps, self.core_obs_dim) # B * 2, total_timesteps, core_obs_dim
+                ball_obs = batch['ball_obs'].pin_memory().to(self.train_device, non_blocking=True).view(-1, self.total_timesteps, self.n_balls, self.ball_obs_dim) # B * 2, total_timesteps, n_balls, ball_obs_dim
+                legal_masks = batch['legal_masks'].pin_memory().to(self.train_device, non_blocking=True).view(-1, self.n_primary_actions) # B * 2 * total_timesteps, n_primary_actions
+                actions = batch['actions'].pin_memory().to(self.train_device, non_blocking=True).view(-1, 4)
+                rewards = batch['rewards'].pin_memory().to(self.train_device, non_blocking=True)
                 values = batch['values'].pin_memory().to(self.train_device, non_blocking=True)
-                move_masks = batch['move_masks'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1) # B * 2 * chunk_size
-                log_probs = batch['log_probs'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1) # B * 2 * chunk_size
-                accum_learner_versions += batch['learner_versions'].mean().item() / self.steps_per_iteration
+                move_masks = batch['move_masks'].pin_memory().to(self.train_device, non_blocking=True).view(-1) # B * 2 * chunk_size
+                log_probs = batch['log_probs'].pin_memory().to(self.train_device, non_blocking=True).view(-1) # B * 2 * chunk_size
+                accum_learner_versions += batch['learner_versions'].mean().item()
+                red_score = batch['red_score']
 
                 # pad observations and create batches of block size
                 pad_core_obs = self.temp_pad_core_obs.expand(core_obs.shape[0], -1, -1)
@@ -161,8 +165,8 @@ class Trainer:
                 core_obs = torch.cat([core_obs, pad_core_obs], dim=1) # B*2, timesteps+block_size-1, core_obs_dim
                 ball_obs = torch.cat([ball_obs, pad_ball_obs], dim=1) # concatenate over timesteps
 
-                core_obs = core_obs.unfold(1, self.block_size, 1).transpose(2, 3).contiguous().view(-1, self.block_size, self.core_obs_dim) # B*2, timesteps, block_size, core_obs_dim -> B*2*timesteps, block_size, core_obs_dim
-                ball_obs = ball_obs.unfold(1, self.block_size, 1).transpose(3, 4).transpose(2, 3).contiguous().view(-1, self.block_size, self.n_balls, self.ball_obs_dim) # B*2, timesteps, n_balls, ball_obs_dim, block_size -> B*2*timesteps, block_size, n_balls, ball_obs_dim
+                core_obs = core_obs.unfold(1, self.block_size, 1).transpose(2, 3).reshape(-1, self.block_size, self.core_obs_dim) # B*2, timesteps, block_size, core_obs_dim -> B*2*timesteps, block_size, core_obs_dim
+                ball_obs = ball_obs.unfold(1, self.block_size, 1).transpose(3, 4).transpose(2, 3).reshape(-1, self.block_size, self.n_balls, self.ball_obs_dim) # B*2, timesteps, n_balls, ball_obs_dim, block_size -> B*2*timesteps, block_size, n_balls, ball_obs_dim
 
                 with torch.no_grad():
                     advantages = self._get_advantage(rewards, values)
@@ -196,7 +200,7 @@ class Trainer:
                         new_values, values, ratios, advantages.view(-1), returns.view(-1), train_mask,
                         p_dist, x_dist, y_dist, theta_dist, move_masks
                     )
-                loss /= self.grad_accumulation_steps
+                    loss /= self.grad_accumulation_steps
                 loss.backward()
             norm = torch.nn.utils.clip_grad_norm_(self.learner.parameters(), max_norm=1.0)
             self.optimizer.step()
@@ -211,20 +215,21 @@ Adv Std {adv_std.item():.4f}, \
 Red Reward Mean {rewards[:, 0].mean().item():.4f}", flush=True)
             
             # logging
-            iteration_batch["policy_loss"] += policy_loss.item() / self.steps_per_iteration
-            iteration_batch["value_loss"] += value_loss.item() / self.steps_per_iteration
-            iteration_batch["entropy_bonus"] += entropy_bonus.item() / self.steps_per_iteration
-            iteration_batch["grad_norm"] += norm / self.steps_per_iteration
-            iteration_batch["adv_mean"] += adv_mean.item() / self.steps_per_iteration
-            iteration_batch["adv_std"] += adv_std.item() / self.steps_per_iteration
-            iteration_batch["red_reward"] += rewards[:, 0].mean().item() / self.steps_per_iteration
-            iteration_batch["n_scoring"] += (actions[0::2, 0] == 4).sum().item() / (self.steps_per_iteration * self.train_episodes)
-            iteration_batch["n_pickup_loaders"] += (actions[0::2, 0] == 2).sum().item() / (self.steps_per_iteration * self.train_episodes)
-            iteration_batch["n_pickup_ground"] += (actions[0::2, 0] == 3).sum().item() / (self.steps_per_iteration * self.train_episodes)
-            iteration_batch["n_block"] += (actions[0::2, 0] == 5).sum().item() / (self.steps_per_iteration * self.train_episodes)
+            iteration_batch["policy_loss"] += policy_loss.item() / self.steps_per_iteration # +
+            iteration_batch["value_loss"] += value_loss.item() / self.steps_per_iteration # +
+            iteration_batch["entropy_bonus"] += entropy_bonus.item() / self.steps_per_iteration # +
+            iteration_batch["grad_norm"] += norm / self.steps_per_iteration # +
+            iteration_batch["adv_mean"] += adv_mean.item() / self.steps_per_iteration # +
+            iteration_batch["adv_std"] += adv_std.item() / self.steps_per_iteration # +
+            iteration_batch["red_reward"] += rewards[:, 0].mean().item() / self.steps_per_iteration # + | this is per single timestep reward for red, not episode reward
+            iteration_batch["n_scoring"] += (actions[0::2, 0] == 4).sum().item() / (self.steps_per_iteration * self.mini_train_episodes)
+            iteration_batch["n_pickup_loaders"] += (actions[0::2, 0] == 2).sum().item() / (self.steps_per_iteration * self.mini_train_episodes)
+            iteration_batch["n_pickup_ground"] += (actions[0::2, 0] == 3).sum().item() / (self.steps_per_iteration * self.mini_train_episodes)
+            iteration_batch["n_block"] += (actions[0::2, 0] == 5).sum().item() / (self.steps_per_iteration * self.mini_train_episodes)
+            iteration_batch["red_score"] += red_score.sum().item() / (self.steps_per_iteration * self.mini_train_episodes)
 
 
-        return accum_learner_versions, iteration_batch
+        return accum_learner_versions / (self.steps_per_iteration * self.grad_accumulation_steps), iteration_batch
 
 
     def train(self):
@@ -258,7 +263,7 @@ Red Reward Mean {rewards[:, 0].mean().item():.4f}", flush=True)
                     torch.save(self.state_dict_learner(self.iteration), learner_ckpt_path)
                     print(f"Saved learner checkpoint at iteration {self.iteration} to {learner_ckpt_path}", flush=True)
                 if self.iteration > 0 and (self.iteration % self.n_save_all_ckpts) == 0:
-                    all_ckpt_path = f"{self.save_ckpt_path}/all_{self.iteration}.pt"
+                    all_ckpt_path = f"{self.save_ckpt_path}/all.pt"
                     torch.save(self.state_dict(self.iteration), all_ckpt_path)
                     print(f"Saved full checkpoint at iteration {self.iteration} to {all_ckpt_path}", flush=True)
                 

@@ -38,10 +38,7 @@ class VexConfig:
             'angle_threshold': math.radians(90), 
         }
     ) # robot can pick up loader if satisfy distance and angle thesholds.
-    ball_obs_dim: int = 28
-    core_obs_dim: int = 85
     n_primary_actions: int = 6
-    n_balls: int = 88 # FIXED. never changes
     
     # AGENT Config
     ndim: int = 128 
@@ -79,7 +76,7 @@ class VexConfig:
 
     core_obs_dim: int = 85
     n_balls: int = 88
-    ball_obs_dim: int = 28
+    ball_obs_dim: int = 29
     total_timesteps: int = 100
 
     # LOGGING

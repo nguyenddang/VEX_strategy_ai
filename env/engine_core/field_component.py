@@ -53,7 +53,8 @@ class Ball:
         colour: str, 
         state: str, 
         add_sim: bool=True, 
-        position: Tuple[float, float]=(-2.0, -2.0)
+        position: Tuple[float, float]=(-2.0, -2.0),
+        loader_level: float=-1,
         ):
         
         self.colour = colour
@@ -76,6 +77,7 @@ class Ball:
         if add_sim:
             space.add(self.body, self.shape)
         self.stop_angular_speed = math.radians(self.config['stop_angular_speed'])
+        self.loader_level = loader_level
 
     def _apply_rolling_resistance(self, body:pymunk.Body, gravity, damping, dt):
         """ Custom damping. to make things look good:)
@@ -421,6 +423,7 @@ class Loader_Manager:
         fill_ball.body.velocity = (0, 0)
         fill_ball.body.angular_velocity = 0
         loader.scored_balls[-1] = fill_ball
+        fill_ball.loader_level = 1.0
         self.left_to_load -= 1
         if self.debug:
             print(
@@ -489,6 +492,7 @@ class Loader:
                 state=self.key,
                 add_sim=False,
                 position=(self.cache_pose['position'][0], self.cache_pose['position'][1]),
+                loader_level=slot_idx / (self.capacity - 1)
             )
             ball.body.velocity = (0, 0)
             ball.body.angular_velocity = 0
@@ -499,12 +503,15 @@ class Loader:
         for idx in range(self.capacity - 1):
             # shift all balls forward by one slot
             self.scored_balls[idx] = self.scored_balls[idx + 1]
+            if self.scored_balls[idx] is not None:
+                self.scored_balls[idx].loader_level = idx / (self.capacity - 1) 
         self.scored_balls[self.capacity - 1] = None
         picked_ball.body.velocity = (0, 0)
         picked_ball.body.angular_velocity = 0
         if picked_ball.colour == robot.key.split("_")[1]: # if ball colour matches robot colour, pick up the ball
             picked_ball.state = robot.key
             picked_ball.body.position = robot.body.position
+            picked_ball.loader_level = -1.0
             robot.inventory.append(picked_ball)
         else:
             drop_distance = self.robot_config['size'] / 2 + self.ball_config['radius'] * 1.25
@@ -517,6 +524,7 @@ class Loader:
             )
             picked_ball.body.velocity = (0, 0)
             picked_ball.body.angular_velocity = 0
+            picked_ball.loader_level = -1.0
             self.body.space.add(picked_ball.body, picked_ball.shape)
         self.manager.fill(self) # trigger manager to fill loader after each pickup
 

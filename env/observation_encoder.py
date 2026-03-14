@@ -44,7 +44,7 @@ class ObservationEncoder:
                   [LG1 side0, LG1 side1, LG2 side0, LG2 side1, CGL side0, CGL side1, CGU side0, CGU side1, LD1, LD2, LD3, LD4]
                   and feature order [dx, dy, dist, heading_err_sin, heading_err_cos].
                   For robot_blue, long goals and loaders are flipped to preserve red-canonical semantics.
-            ball_obs (num_balls x 28): for each ball, see _get_balls_obs for details
+            ball_obs (num_balls x 29): for each ball, see _get_balls_obs for details
         """
         field_dict = field.to_field_dict()
         observations = {
@@ -193,7 +193,7 @@ class ObservationEncoder:
     def _get_balls_obs(self, field_dict: Dict[str, Any], robot_key: str):
         """Returns ball observations for robot_key. 
         Ball observations (for each ball):
-            - x_norm, y_norm: position
+            - x_norm, y_norm, loader_level: position
             - dx_norm, dy_norm: relative position to robot normalized by field dimension
             - dist_norm: normalized distance to robot
             - heading_err_sin, heading_err_cos: sin and cos of heading error to robot
@@ -237,6 +237,7 @@ class ObservationEncoder:
             dx_norm, dy_norm = dx / self.engine_config['field']['width'], dy / self.engine_config['field']['height']
             x, y = x_curr_robot + dx, y_curr_robot + dy
             x_norm, y_norm = x / self.engine_config['field']['width'], y / self.engine_config['field']['height']
+            loader_level = ball.loader_level
             heading_err_sin, heading_err_cos = math.sin(delta_theta), math.cos(delta_theta)
             dist_norm = dist / math.hypot(self.engine_config['field']['width'], self.engine_config['field']['height'])
             ball_state = ball.state
@@ -254,7 +255,7 @@ class ObservationEncoder:
             elif robot_key == "robot_blue":
                 x_norm, y_norm = 1 - x_norm, 1 - y_norm
                 dx_norm, dy_norm = -dx_norm, -dy_norm
-            balls_obs_p1.append([x_norm, y_norm, dx_norm, dy_norm, dist_norm, heading_err_sin, heading_err_cos])
+            balls_obs_p1.append([x_norm, y_norm, loader_level, dx_norm, dy_norm, dist_norm, heading_err_sin, heading_err_cos])
         
         ball_obs_p1 = torch.tensor(balls_obs_p1, dtype=torch.float32)
         ball_obs_p2_idx = torch.tensor(ball_obs_p2_idx, dtype=torch.long)

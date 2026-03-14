@@ -131,3 +131,8 @@ class GeniusFormer(nn.Module):
             'values': out["value_logits"].squeeze(-1), # (B)
             'move_mask': move_mask,
         }
+        
+    def reset_kv_cache(self):
+        # set all self.k_cache, self.v_cache to in Attention module to None
+        for block in self.transformer.transformers.h:
+            block.attn.reset_kv_cache()
