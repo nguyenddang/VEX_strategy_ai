@@ -44,6 +44,10 @@ class Attention(nn.Module):
         
         return y
     
+    def reset_kv_cache(self):
+        self.k_cache = None
+        self.v_cache = None
+    
 class Block(nn.Module):
     def __init__(self, config: VexConfig):
         super().__init__()

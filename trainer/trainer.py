@@ -53,6 +53,7 @@ class Trainer:
         # init model, shared buffer, league, and inference server.
         self.unoptimzed_learner = None
         self.learner = GeniusFormer(config)
+        self.learner.train()
         self.buffer = SharedBuffer(config)
         self.league = SharedLeague(config)
 
@@ -145,14 +146,14 @@ class Trainer:
         for step in range(self.steps_per_iteration):
             for g_step in range(self.grad_accumulation_steps):
                 batch = self.buffer.pull_from_buffer()
-                core_obs = batch['core_obs'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1, self.total_timesteps, self.core_obs_dim) # B * 2, total_timesteps, core_obs_dim
-                ball_obs = batch['ball_obs'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1, self.total_timesteps, self.n_balls, self.ball_obs_dim) # B * 2, total_timesteps, n_balls, ball_obs_dim
-                legal_masks = batch['legal_masks'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1, self.n_primary_actions) # B * 2 * total_timesteps, n_primary_actions
-                actions = batch['actions'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1, 4)
-                rewards = batch['rewards'].pin_memory().to(self.train_device, non_blocking=True).contiguous()
+                core_obs = batch['core_obs'].pin_memory().to(self.train_device, non_blocking=True).view(-1, self.total_timesteps, self.core_obs_dim) # B * 2, total_timesteps, core_obs_dim
+                ball_obs = batch['ball_obs'].pin_memory().to(self.train_device, non_blocking=True).view(-1, self.total_timesteps, self.n_balls, self.ball_obs_dim) # B * 2, total_timesteps, n_balls, ball_obs_dim
+                legal_masks = batch['legal_masks'].pin_memory().to(self.train_device, non_blocking=True).view(-1, self.n_primary_actions) # B * 2 * total_timesteps, n_primary_actions
+                actions = batch['actions'].pin_memory().to(self.train_device, non_blocking=True).view(-1, 4)
+                rewards = batch['rewards'].pin_memory().to(self.train_device, non_blocking=True)
                 values = batch['values'].pin_memory().to(self.train_device, non_blocking=True)
-                move_masks = batch['move_masks'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1) # B * 2 * chunk_size
-                log_probs = batch['log_probs'].pin_memory().to(self.train_device, non_blocking=True).contiguous().view(-1) # B * 2 * chunk_size
+                move_masks = batch['move_masks'].pin_memory().to(self.train_device, non_blocking=True).view(-1) # B * 2 * chunk_size
+                log_probs = batch['log_probs'].pin_memory().to(self.train_device, non_blocking=True).view(-1) # B * 2 * chunk_size
                 accum_learner_versions += batch['learner_versions'].mean().item() / self.steps_per_iteration
 
                 # pad observations and create batches of block size
@@ -161,8 +162,8 @@ class Trainer:
                 core_obs = torch.cat([core_obs, pad_core_obs], dim=1) # B*2, timesteps+block_size-1, core_obs_dim
                 ball_obs = torch.cat([ball_obs, pad_ball_obs], dim=1) # concatenate over timesteps
 
-                core_obs = core_obs.unfold(1, self.block_size, 1).transpose(2, 3).contiguous().view(-1, self.block_size, self.core_obs_dim) # B*2, timesteps, block_size, core_obs_dim -> B*2*timesteps, block_size, core_obs_dim
-                ball_obs = ball_obs.unfold(1, self.block_size, 1).transpose(3, 4).transpose(2, 3).contiguous().view(-1, self.block_size, self.n_balls, self.ball_obs_dim) # B*2, timesteps, n_balls, ball_obs_dim, block_size -> B*2*timesteps, block_size, n_balls, ball_obs_dim
+                core_obs = core_obs.unfold(1, self.block_size, 1).transpose(2, 3).reshape(-1, self.block_size, self.core_obs_dim) # B*2, timesteps, block_size, core_obs_dim -> B*2*timesteps, block_size, core_obs_dim
+                ball_obs = ball_obs.unfold(1, self.block_size, 1).transpose(3, 4).transpose(2, 3).reshape(-1, self.block_size, self.n_balls, self.ball_obs_dim) # B*2, timesteps, n_balls, ball_obs_dim, block_size -> B*2*timesteps, block_size, n_balls, ball_obs_dim
 
                 with torch.no_grad():
                     advantages = self._get_advantage(rewards, values)
@@ -196,7 +197,7 @@ class Trainer:
                         new_values, values, ratios, advantages.view(-1), returns.view(-1), train_mask,
                         p_dist, x_dist, y_dist, theta_dist, move_masks
                     )
-                loss /= self.grad_accumulation_steps
+                    loss /= self.grad_accumulation_steps
                 loss.backward()
             norm = torch.nn.utils.clip_grad_norm_(self.learner.parameters(), max_norm=1.0)
             self.optimizer.step()

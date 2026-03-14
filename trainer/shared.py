@@ -50,23 +50,17 @@ class SharedBuffer:
         
     def pull_from_buffer(self):
         # called by trainer gpu to pull a batch of data from the buffer.
-        batch = {k: [] for k in self.buffer}
-        while torch.sum(self.written_before) < self.mini_train_episodes:
-            time.sleep(0.01) # wait until enough episodes are written by workers.
-        while len(batch['core_obs']) < self.mini_train_episodes:
-            rand_skip = random.randint(0, 3)
-            for _ in range(rand_skip):
-                idx = self.read_write_queue.get()
-                self.read_write_queue.put(idx)
+        ids = []
+        batch = {k: None for k in self.buffer}
+        while torch.sum(self.written_before) < self.buffer_capacity:
+            time.sleep(0.05) # wait until enough episodes are written by workers.
+        while len(ids) < self.mini_train_episodes:
             idx = self.read_write_queue.get() # block until enough chunks are ready.
-            if not self.written_before[idx]:
-                self.read_write_queue.put(idx) # put back if never been written to and sleep a bit
-                continue
-            for key in self.buffer:
-                batch[key].append(self.buffer[key][idx]) 
-            self.read_write_queue.put(idx) # give back to queue 
-        for key in batch:
-            batch[key] = torch.stack(batch[key], dim=0)
+            ids.append(idx)
+        for key in self.buffer:
+            batch[key] = self.buffer[key][ids]
+        for idx in ids:
+            self.read_write_queue.put(idx)
         return batch
     
 
