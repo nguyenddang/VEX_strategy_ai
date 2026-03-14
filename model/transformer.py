@@ -22,7 +22,10 @@ class Attention(nn.Module):
             self.k_cache = torch.cat([self.k_cache, k], dim=2)[:, :, -self.config.block_size:, :]
             self.v_cache = torch.cat([self.v_cache, v], dim=2)[:, :, -self.config.block_size:, :]
         return self.k_cache, self.v_cache
-
+    
+    def reset_cv_cache(self):
+        self.k_cache = None
+        self.v_cache = None
 
     # x: B, T, n_embd
     # padding_mask: timesteps, T

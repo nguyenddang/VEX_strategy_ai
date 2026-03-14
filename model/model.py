@@ -50,9 +50,13 @@ class GeniusFormer(nn.Module):
         padding_mask = pads.unfold(0, self.config.block_size, 1)
 
         attn_mask = causal_mask | padding_mask.unsqueeze(-1).expand(-1, -1, self.config.block_size).unsqueeze(0) 
-        attn_mask = attn_mask.expand(self.config.train_episodes*2, -1, -1, -1).contiguous().view(-1, 1, self.config.block_size, self.config.block_size)
+        attn_mask = attn_mask.expand(self.config.mini_train_episodes*2, -1, -1, -1).contiguous().view(-1, 1, self.config.block_size, self.config.block_size)
 
         return attn_mask
+    
+    def reset_kv_cache(self):
+        for block in self.transformer.transformers.h:
+            block.attn.reset_cv_cache()
 
     def forward(self, core_obs, ball_obs, legal_masks, do_inference=False):
         """

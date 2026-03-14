@@ -10,8 +10,10 @@ if __name__ == "__main__":
     config.n_workers = 90
     config.buffer_capacity = 150
     config.train_episodes = 32
-    config.log_wandb = True
+    config.log_wandb = False
     config.mini_train_episodes = 32 if torch.cuda.get_device_name(0).split(' ')[-1] == 'H200' else 16
+
+    print(f"Using device: {torch.cuda.get_device_name(0)}")
 
     trainer = Trainer(config)
     trainer.train()

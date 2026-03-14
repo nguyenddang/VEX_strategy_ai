@@ -44,20 +44,26 @@ def worker_decentralized_fn(
         opp_idx, p, n, param = league.sample_opponent(worker_id)
         torch.nn.utils.vector_to_parameters(param, opponent_model.parameters())
         zeros_buffer(local_buffer)
+
+        # check if learner has been updated. If yes, pull 
+        with league.learner_lock:
+            if league.learner_version.value != worker_learner_version:
+                torch.nn.utils.vector_to_parameters(league.learner_param, learner_model.parameters())
+                worker_learner_version = league.learner_version.value
+        
+        for model in [learner_model, opponent_model]:
+            model.reset_kv_cache()
+
         env_out = env.reset()
         done, legal_actions, observations, rewards, timestep = \
             env_out['done'], env_out['legal_actions'], env_out['observations'], env_out['rewards'], env_out['timestep']
+        
         while not done:
             for p_idx, robot_key in enumerate(['robot_red', 'robot_blue']):
                 local_buffer['core_obs'][p_idx, timestep].copy_(observations[robot_key]['core_obs'])
                 local_buffer['ball_obs'][p_idx, timestep].copy_(observations[robot_key]['ball_obs'])
                 local_buffer['legal_masks'][p_idx, timestep].copy_(legal_actions[robot_key])
             with torch.no_grad():
-                # check if learner has been updated. If yes, pull 
-                with league.learner_lock:
-                    if league.learner_version.value != worker_learner_version:
-                        torch.nn.utils.vector_to_parameters(league.learner_param, learner_model.parameters())
-                        worker_learner_version = league.learner_version.value
                 # learner inference
                 learner_out = learner_model(
                     local_buffer['core_obs'][:, [timestep]], # (2, some size of block, core_obs_dim)
