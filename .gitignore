@@ -13,3 +13,4 @@ wheels/
 wandb/
 *.out
 checkpoints/
+checkpoints_0/
