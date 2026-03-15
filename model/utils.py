@@ -29,7 +29,7 @@ class CoreEncoder(nn.Module):
     def forward(self, core_obs):
         # core_obs: (B, block_size, core_obs_dim)
         x = self.gelu(self.fc_1(core_obs))
-        x = self.gelu(self.fc_2(x)) # (B, block_size, n_embd//2)
+        x = self.fc_2(x) # (B, block_size, n_embd//2)
         x = self.ln(x)
         return x
 
@@ -52,7 +52,7 @@ class Encoder(nn.Module):
         x = torch.cat([core_embed, ball_embed], dim=-1) # (B, block_size, n_embd)
 
         x = self.gelu(self.fc_1(x))
-        x = self.gelu(self.fc_2(x))
+        x = self.fc_2(x)
         x = self.ln(x)
         return x
 

@@ -54,7 +54,7 @@ class VexConfig:
 
     steps_per_iteration: int = 8
     train_device: str = 'cuda:0'
-    lr: float = 1e-4
+    lr: float = 1e-5
     update_league: int = 10
 
     # GAE

@@ -27,6 +27,7 @@ class Attention(nn.Module):
         self.k_cache = None
         self.v_cache = None
 
+
     # x: B, T, n_embd
     # padding_mask: timesteps, T
     def forward(self, x, attn_mask):
@@ -46,10 +47,6 @@ class Attention(nn.Module):
         y = self.proj(y)
         
         return y
-    
-    def reset_kv_cache(self):
-        self.k_cache = None
-        self.v_cache = None
     
 class Block(nn.Module):
     def __init__(self, config: VexConfig):

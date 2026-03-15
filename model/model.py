@@ -5,6 +5,7 @@ from torch.distributions import Categorical
 import torch.nn.functional as F
 from model.utils import Encoder
 from model.transformer import Transformer
+import math 
 
 """
 Global:
@@ -90,11 +91,11 @@ class GeniusFormer(nn.Module):
     
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.088)
+            torch.nn.init.normal_(module.weight, mean=0.0, std=1/math.sqrt(self.config.n_embd))
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.088)
+            torch.nn.init.normal_(module.weight, mean=0.0, std=1/math.sqrt(self.config.n_embd))
     
     def inference(self, out):
         """
@@ -132,7 +133,3 @@ class GeniusFormer(nn.Module):
             'move_mask': move_mask,
         }
         
-    def reset_kv_cache(self):
-        # set all self.k_cache, self.v_cache to in Attention module to None
-        for block in self.transformer.transformers.h:
-            block.attn.reset_kv_cache()

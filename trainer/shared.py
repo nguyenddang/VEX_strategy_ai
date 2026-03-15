@@ -24,7 +24,7 @@ class SharedBuffer:
             'values': torch.zeros((self.buffer_capacity, 2, self.max_actions + 1), dtype=torch.float32).share_memory_(),
             'move_masks': torch.zeros((self.buffer_capacity, 2, self.max_actions), dtype=torch.bool).share_memory_(),
             'log_probs': torch.zeros((self.buffer_capacity, 2, self.max_actions), dtype=torch.float32).share_memory_(),
-            'learner_versions': torch.zeros((self.buffer_capacity, self.max_actions), dtype=torch.float32).share_memory_(), 
+            'learner_versions': torch.zeros((self.buffer_capacity, self.max_actions), dtype=torch.float32).share_memory_(), # TODO: change this to take only a single version instead of the the total episodes
             'red_score': torch.zeros((self.buffer_capacity, 1), dtype=torch.float32).share_memory_(),
         }
         

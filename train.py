@@ -15,7 +15,7 @@ if __name__ == "__main__":
     config.n_embd = 196
     config.n_save_learner_ckpts = 250
     config.n_save_all_ckpts = 25
-    config.log_wandb = True
+    config.log_wandb = False
     config.mini_train_episodes = 16 if torch.cuda.get_device_name(0).split(' ')[-1] == 'H200' else 8
 
     print(f"Using device: {torch.cuda.get_device_name(0)}")

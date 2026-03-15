@@ -41,6 +41,11 @@ class Trainer:
         self.temp_pad_ball_obs = torch.ones((config.block_size - 1, config.n_balls, config.ball_obs_dim), dtype=torch.float32, device=config.train_device) * -1
         self.temp_pad_ball_obs = self.temp_pad_ball_obs.unsqueeze(0)
 
+        train_mask = torch.zeros(self.config.mini_train_episodes, 2, self.max_actions + self.block_size - 1, device=self.train_device, dtype=torch.bool)
+        train_mask[:, :, 0] = 1
+        train_mask = train_mask.view(-1, self.max_actions + self.block_size - 1).unfold(1, self.block_size, 1)
+        self.train_mask = train_mask[:, :, 0].reshape(-1)
+
         # gae config
         self.gamma = config.gamma
         self.lam = config.lam
@@ -59,7 +64,7 @@ class Trainer:
         self.league = SharedLeague(config)
 
         # init optimizer
-        self.optimizer = torch.optim.Adam(self.learner.parameters(), lr=config.lr)
+        self.optimizer = torch.optim.AdamW(self.learner.parameters(), lr=config.lr)
 
         if config.resume_training:
             self.load_state_dict(config.load_ckpt_path)
@@ -84,6 +89,7 @@ class Trainer:
             self.unoptimzed_learner = self.learner
             self.learner = torch.compile(self.learner)
         print(f"Gradient accumulation steps: {self.grad_accumulation_steps}", flush=True)
+
         # logging
         self.log_wandb = config.log_wandb
         if self.log_wandb:
@@ -110,20 +116,17 @@ class Trainer:
     
     def _get_loss(self, values, values_old, ratios, advantages, returns, train_mask,
                   p_dist: Categorical, x_dist: Categorical, y_dist: Categorical, theta_dist: Categorical, move_masks: torch.Tensor):
-        """
-        
-        """
         value_loss = torch.max(
             F.mse_loss(values, returns, reduction='none'),
             F.mse_loss(
                 torch.clamp(values, values_old - self.value_epsilon, values_old + self.value_epsilon),
                 returns,
                 reduction='none')).mean()
-        ratios = ratios[train_mask]
-        advantages = advantages[train_mask]
+        rt = ratios[train_mask]
+        adv = advantages[train_mask]
         policy_loss = -torch.min(
-            ratios * advantages,
-            torch.clamp(ratios, 1.0 - self.policy_epsilon, 1.0 + self.policy_epsilon) * advantages).mean()
+            rt * adv,
+            torch.clamp(rt, 1.0 - self.policy_epsilon, 1.0 + self.policy_epsilon) * adv).mean()
         entropy_bonus = (p_dist.entropy() + move_masks * (x_dist.entropy() + y_dist.entropy() + theta_dist.entropy()))[train_mask].mean()
         total_loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy_bonus
         return total_loss, policy_loss, value_loss, entropy_bonus
@@ -194,10 +197,8 @@ class Trainer:
                     new_values = outputs["value_logits"].squeeze(-1)
                     values = values[:, :, :-1].contiguous().view(-1)
 
-                    train_mask = torch.arange(0, new_values.shape[0], 2, device=self.train_device)
-
                     loss, policy_loss, value_loss, entropy_bonus = self._get_loss(
-                        new_values, values, ratios, advantages.view(-1), returns.view(-1), train_mask,
+                        new_values, values, ratios, advantages.view(-1), returns.view(-1), self.train_mask,
                         p_dist, x_dist, y_dist, theta_dist, move_masks
                     )
                     loss /= self.grad_accumulation_steps
@@ -212,7 +213,8 @@ Entropy Bonus {entropy_bonus.item():.4f}, \
 Grad Norm {norm:.4f}, \
 Adv Mean {adv_mean.item():.4f}, \
 Adv Std {adv_std.item():.4f}, \
-Red Reward Mean {rewards[:, 0].mean().item():.4f}", flush=True)
+Red Reward Mean {rewards[:, 0].sum(-1).mean().item():.4f} \
+Red Score {red_score.mean().item():.4f}", flush=True)
             
             # logging
             iteration_batch["policy_loss"] += policy_loss.item() / self.steps_per_iteration # +
@@ -221,12 +223,12 @@ Red Reward Mean {rewards[:, 0].mean().item():.4f}", flush=True)
             iteration_batch["grad_norm"] += norm / self.steps_per_iteration # +
             iteration_batch["adv_mean"] += adv_mean.item() / self.steps_per_iteration # +
             iteration_batch["adv_std"] += adv_std.item() / self.steps_per_iteration # +
-            iteration_batch["red_reward"] += rewards[:, 0].mean().item() / self.steps_per_iteration # + | this is per single timestep reward for red, not episode reward
-            iteration_batch["n_scoring"] += (actions[0::2, 0] == 4).sum().item() / (self.steps_per_iteration * self.mini_train_episodes)
-            iteration_batch["n_pickup_loaders"] += (actions[0::2, 0] == 2).sum().item() / (self.steps_per_iteration * self.mini_train_episodes)
-            iteration_batch["n_pickup_ground"] += (actions[0::2, 0] == 3).sum().item() / (self.steps_per_iteration * self.mini_train_episodes)
-            iteration_batch["n_block"] += (actions[0::2, 0] == 5).sum().item() / (self.steps_per_iteration * self.mini_train_episodes)
-            iteration_batch["red_score"] += red_score.sum().item() / (self.steps_per_iteration * self.mini_train_episodes)
+            iteration_batch["red_reward"] += rewards[:, 0].sum().item() / self.steps_per_iteration # + | this is per single timestep reward for red, not episode reward
+            iteration_batch["n_scoring"] += (actions[0::2, 0] == 4).sum().item() / (self.steps_per_iteration * self.mini_train_episodes) # + | this is the sum of scoring action in whole episode
+            iteration_batch["n_pickup_loaders"] += (actions[0::2, 0] == 2).sum().item() / (self.steps_per_iteration * self.mini_train_episodes) # + ...
+            iteration_batch["n_pickup_ground"] += (actions[0::2, 0] == 3).sum().item() / (self.steps_per_iteration * self.mini_train_episodes) # + ...
+            iteration_batch["n_block"] += (actions[0::2, 0] == 5).sum().item() / (self.steps_per_iteration * self.mini_train_episodes) # + ...
+            iteration_batch["red_score"] += red_score.sum().item() / (self.steps_per_iteration * self.mini_train_episodes) # + | this is at the end of a single episode, so this is just a single episode
 
 
         return accum_learner_versions / (self.steps_per_iteration * self.grad_accumulation_steps), iteration_batch
@@ -242,9 +244,10 @@ Red Reward Mean {rewards[:, 0].mean().item():.4f}", flush=True)
                 N, iteration_batch = self._train_iteration()
 
                 self.league.update_learner_param(self.learner if self.unoptimzed_learner is None else self.unoptimzed_learner)
-                if self.iteration % self.update_league == 0 and self.iteration > 0:
-                    print(f"Updating league at iteration {self.iteration}", flush=True)
-                    self.league.update_latest_snapshot(self.learner if self.unoptimzed_learner is None else self.unoptimzed_learner)
+                # DEBUG
+                # if self.iteration % self.update_league == 0 and self.iteration > 0:
+                #     print(f"Updating league at iteration {self.iteration}", flush=True)
+                #     self.league.update_latest_snapshot(self.learner if self.unoptimzed_learner is None else self.unoptimzed_learner)
 
                 # torch.cuda.synchronize()
                 end_time = time.time()

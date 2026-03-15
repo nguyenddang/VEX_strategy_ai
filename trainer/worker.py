@@ -99,5 +99,8 @@ def worker_decentralized_fn(
 
         local_buffer['red_score'][0] = red_score
         delta = 0.01/(n * p)
-        league.update_quality(opp_idx, delta)
+        red_won = env_out['score']['robot_red'] > env_out['score']['robot_blue']
+        if red_won:
+            league.update_quality(opp_idx, delta)
+        print(f"[Worker {worker_id}]: Learner {worker_learner_version} Opp {opp_idx} - Score: {env_out['score']['robot_red']} -  {env_out['score']['robot_blue']} - {'RED WON' if red_won else 'BLUE WON'} - Quality Delta: {delta:.4f}", flush=True)
         buffer.push_to_buffer(local_buffer)
