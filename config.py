@@ -15,30 +15,30 @@ class VexConfig:
     max_duration_s: float = 120.0
     max_offset: float = 30.0 # in cm. max relative MOVE extent in x/y from current robot position.
     N: int = 31 # number of bins per axis for MOVE grid around robot.
-    K: int = 16 # number of bins for relative heading change in MOVE.
+    K: int = 73 # number of bins for relative heading change in MOVE.
     render_mode: str | None = None
     window_width: int = 1200
     window_height: int = 1200
     robot_capacity: int = 10 # can hold up to robot_capacity balls.
     ball_pickup_hitbox: dict[str, float] = field(
         default_factory=lambda: {
-            'dist_threshold': 40, # cm
-            'angle_threshold': math.radians(90), 
+            'dist_threshold': 35, # cm
+            'angle_threshold': math.radians(30), 
         }
     ) # robot can pick up ball if satisfy distance and angle thesholds.
     goal_action_hitbox: dict[str, float] = field(
         default_factory=lambda: {
-            'dist_threshold': 40,
-            'angle_threshold': math.radians(90),
+            'dist_threshold': 25,
+            'angle_threshold': math.radians(30),
         }
     ) # robot can score if satisfy distance and angle thesholds to the scoring position of the goal.
     loader_pickup_hitbox: dict[str, float] = field(
         default_factory=lambda: {
-            'dist_threshold': 40, # cm
-            'angle_threshold': math.radians(90), 
+            'dist_threshold': 25, # cm
+            'angle_threshold': math.radians(30), 
         }
     ) # robot can pick up loader if satisfy distance and angle thesholds.
-    n_primary_actions: int = 6
+    n_primary_actions: int = 5
     
     # AGENT Config
     ndim: int = 128 
@@ -108,5 +108,3 @@ class VexConfig:
             engine_config = yaml.safe_load(f)
         self.engine_config = engine_config
 
-        # creating ckpt directory if not exist
-        os.makedirs(self.save_ckpt_path, exist_ok=True)

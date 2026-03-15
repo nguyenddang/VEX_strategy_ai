@@ -76,19 +76,18 @@ class VexEnv:
             - move_theta: MOVE heading-bin index [0..K-1]
             
             Discrete: 
-            - 0: NO-OP
-            - 1: MOVE
-            - 2: PICKUP LOADERS
-            - 3: PICKUP GROUND
-            - 4: SCORE
-            - 5: BLOCK
+            - 0: MOVE
+            - 1: PICKUP LOADERS
+            - 2: PICKUP GROUND
+            - 3: SCORE
+            - 4: BLOCK
 
-            MOVE bins are only used when discrete == 1.
+            MOVE bins are only used when discrete == 0.
             
             action example:
             {
-                'robot_red': [1 (MOVE), 3 (x-bin), 4 (y-bin), 5 (theta-bin)],
-                'robot_blue': [1 (MOVE), 7 (x-bin), 9 (y-bin), 2 (theta-bin)], # x,y,theta bin are red-canonical. Env will mirror them into world frame for blue.
+                'robot_red': [0 (MOVE), 3 (x-bin), 4 (y-bin), 5 (theta-bin)],
+                'robot_blue': [0 (MOVE), 7 (x-bin), 9 (y-bin), 2 (theta-bin)], # x,y,theta bin are red-canonical. Env will mirror them into world frame for blue.
             }
         """
         self.field.actions_counter += 1
@@ -98,30 +97,28 @@ class VexEnv:
         for player in ["robot_red", "robot_blue"]:
             dis_act = action[player][0]
             robot = self.field.robot_red if player == "robot_red" else self.field.robot_blue
-            if dis_act == 0: # NO-OP
-                pass
-            elif dis_act == 1: # MOVE
+            if dis_act == 0: # MOVE
                 x_idx = action[player][1]
                 y_idx = action[player][2]
                 theta_idx = action[player][3]
 
-                delta_x = -self.main_config.max_offset + (2.0 * self.main_config.max_offset * x_idx) / (self.main_config.N - 1)
-                delta_y = -self.main_config.max_offset + (2.0 * self.main_config.max_offset * y_idx) / (self.main_config.N - 1)
-                delta_theta = -math.pi + (2.0 * math.pi * (theta_idx + 0.5)) / self.main_config.K
+                delta_x = (x_idx - (self.main_config.N - 1) / 2) * (2.0 * self.main_config.max_offset / (self.main_config.N - 1))
+                delta_y = (y_idx - (self.main_config.N - 1) / 2) * (2.0 * self.main_config.max_offset / (self.main_config.N - 1))
+                delta_theta = (theta_idx - (self.main_config.K - 1) / 2) * (2.0 * math.pi / (self.main_config.K - 1))
                 target_x = robot.body.position.x + delta_x
                 target_y = robot.body.position.y + delta_y
                 target_theta = robot.body.angle + delta_theta
                 robot.set_motion_target((target_x, target_y), target_theta)
-            elif dis_act == 2: # PICKUP LOADERS
+            elif dis_act == 1: # PICKUP LOADERS
                 robot.pickup_loader()
                 # print(f"{player} attempts to pickup loader at timestep {self.field.actions_counter}")
-            elif dis_act == 3: # PICKUP GROUND
+            elif dis_act == 2: # PICKUP GROUND
                 robot.pickup_ground()
                 # print(f"{player} attempts to pickup ground ball at timestep {self.field.actions_counter}")
-            elif dis_act == 4: # SCORE
+            elif dis_act == 3: # SCORE
                 robot.score_goal()
                 # print(f"{player} attempts to score at timestep {self.field.actions_counter}")
-            elif dis_act == 5: # BLOCK
+            elif dis_act == 4: # BLOCK
                 robot.block_goal()
                 # print(f"{player} attempts to block at timestep {self.field.actions_counter}")
         
@@ -186,21 +183,21 @@ class VexEnv:
         done: bool,
     ):
         reward_red, reward_blue = 0, 0
-        reward_red += (post_red_score - prev_red_score) * 0.1
-        reward_red += 0.1 if post_red_inven > prev_red_inven else 0 # incentivize pickup
-        reward_blue += (post_blue_score - prev_blue_score) * 0.1
-        reward_blue += 0.1 if post_blue_inven > prev_blue_inven else 0 # incentivize pickup
+        reward_red += (post_red_score - prev_red_score) * 0.5
+        reward_red += 1.0 if post_red_inven > prev_red_inven else 0 # incentivize pickup
+        reward_blue += (post_blue_score - prev_blue_score) * 0.5
+        reward_blue += 1.0 if post_blue_inven > prev_blue_inven else 0 # incentivize pickup
         if done:
             if post_red_score > post_blue_score:
-                reward_red += 2.0
+                reward_red += 5.0
                 score_diff = post_red_score - post_blue_score
                 # bonus for winning by larger margin
-                reward_red += 0.01 * score_diff
+                reward_red += 0.1 * score_diff
             elif post_blue_score > post_red_score:
-                reward_blue += 2.0
+                reward_blue += 5.0
                 score_diff = post_blue_score - post_red_score
                 # bonus for winning by larger margin
-                reward_blue += 0.01 * score_diff
+                reward_blue += 0.1 * score_diff
 
         temp = reward_red
         reward_red = reward_red - reward_blue

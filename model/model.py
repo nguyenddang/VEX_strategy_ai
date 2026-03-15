@@ -122,7 +122,7 @@ class GeniusFormer(nn.Module):
         y_prob = y_dist.log_prob(y_act) # (B)
         theta_prob = theta_dist.log_prob(theta_act)
 
-        move_mask = (p_act == 1) # only when primary action is MOVE, the x/y/theta bins matter.
+        move_mask = (p_act == 0) # only when primary action is MOVE, the x/y/theta bins matter.
         log_prob = p_prob + move_mask * (x_prob + y_prob + theta_prob) # (B)
 
         return {

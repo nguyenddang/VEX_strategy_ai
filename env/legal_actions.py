@@ -117,7 +117,7 @@ class LegalActionResolver:
             can_block = block_target is not None
             can_pickup_loader = loader_target is not None
             can_pickup_ground = pickup_ball is not None
-            discrete_mask = [True, True, can_pickup_loader, can_pickup_ground, can_score, can_block]
+            discrete_mask = [True, can_pickup_loader, can_pickup_ground, can_score, can_block]
             robot._building_score_target = score_target
             robot._building_block_target = block_target
             robot._building_loader_target = loader_target

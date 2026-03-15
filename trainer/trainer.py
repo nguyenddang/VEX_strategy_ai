@@ -36,9 +36,9 @@ class Trainer:
         self.block_size = config.block_size
         self.grad_accumulation_steps = int(self.train_episodes // config.mini_train_episodes)
 
-        self.temp_pad_core_obs = torch.ones((config.block_size - 1, config.core_obs_dim), dtype=torch.float32, device=config.train_device) * -1
+        self.temp_pad_core_obs = torch.zeros((config.block_size - 1, config.core_obs_dim), dtype=torch.float32, device=config.train_device)
         self.temp_pad_core_obs = self.temp_pad_core_obs.unsqueeze(0)
-        self.temp_pad_ball_obs = torch.ones((config.block_size - 1, config.n_balls, config.ball_obs_dim), dtype=torch.float32, device=config.train_device) * -1
+        self.temp_pad_ball_obs = torch.zeros((config.block_size - 1, config.n_balls, config.ball_obs_dim), dtype=torch.float32, device=config.train_device)
         self.temp_pad_ball_obs = self.temp_pad_ball_obs.unsqueeze(0)
 
         train_mask = torch.zeros(self.config.mini_train_episodes, 2, self.max_actions + self.block_size - 1, device=self.train_device, dtype=torch.bool)
@@ -205,6 +205,19 @@ class Trainer:
             norm = torch.nn.utils.clip_grad_norm_(self.learner.parameters(), max_norm=1.0)
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
+            # calculate the percentage of primary actions in the batch 
+            n_move = (actions[self.train_mask][:, 0] == 0).sum().item()
+            n_total = self.train_mask.sum().item()
+            move_percentage = n_move / n_total if n_total > 0 else 0.
+            n_score = (actions[self.train_mask][:, 0] == 3).sum().item()
+            score_percentage = n_score / n_total if n_total > 0 else 0
+            n_block = (actions[self.train_mask][:, 0] == 4).sum().item()
+            block_percentage = n_block / n_total if n_total > 0 else 0
+            n_pickup_loaders = (actions[self.train_mask][:, 0] == 1).sum().item()
+            pickup_loaders_percentage = n_pickup_loaders / n_total if n_total > 0 else 0
+            n_pickup_ground = (actions[self.train_mask][:, 0] == 2).sum().item()
+            pickup_ground_percentage = n_pickup_ground / n_total if n_total > 0 else 0
+            # print(f"Step {step}: Move {move_percentage:.2%}, Score {score_percentage:.2%}, Block {block_percentage:.2%}, Pickup Loaders {pickup_loaders_percentage:.2%}, Pickup Ground {pickup_ground_percentage:.2%}", flush=True)
             print(f"Step {step}: Loss {(self.grad_accumulation_steps * loss).item():.4f}, \
 Policy Loss {policy_loss.item():.4f}, \
 Value Loss {value_loss.item():.4f}, \
@@ -224,10 +237,6 @@ Blue Score {blue_score.mean().item():.4f}", flush=True)
             iteration_batch["adv_mean"] += adv_mean.item() / self.steps_per_iteration # +
             iteration_batch["adv_std"] += adv_std.item() / self.steps_per_iteration # +
             iteration_batch["red_reward"] += rewards[:, 0].sum().item() / self.steps_per_iteration # + | this is per single timestep reward for red, not episode reward
-            iteration_batch["n_scoring"] += (actions[self.train_mask][:, 0] == 4).sum().item() / (self.steps_per_iteration * self.mini_train_episodes) # + | this is the sum of scoring action in whole episode
-            iteration_batch["n_pickup_loaders"] += (actions[self.train_mask][:, 0] == 2).sum().item() / (self.steps_per_iteration * self.mini_train_episodes) # + ...
-            iteration_batch["n_pickup_ground"] += (actions[self.train_mask][:, 0] == 3).sum().item() / (self.steps_per_iteration * self.mini_train_episodes) # + ...
-            iteration_batch["n_block"] += (actions[self.train_mask][:, 0] == 5).sum().item() / (self.steps_per_iteration * self.mini_train_episodes) # + ...
             iteration_batch["red_score"] += red_score.sum().item() / (self.steps_per_iteration * self.mini_train_episodes) # + | this is at the end of a single episode, so this is just a single episode
             iteration_batch["blue_score"] += blue_score.sum().item() / (self.steps_per_iteration * self.mini_train_episodes) # + ...
 
