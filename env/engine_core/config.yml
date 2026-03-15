@@ -149,6 +149,6 @@ category_flag:
   goal_upper: 8
 
 blocking:
-  distance_threshold: 1.0
+  distance_threshold: 2.0
   angle_threshold: 5.0
 

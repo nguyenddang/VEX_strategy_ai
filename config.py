@@ -28,13 +28,13 @@ class VexConfig:
     ) # robot can pick up ball if satisfy distance and angle thesholds.
     goal_action_hitbox: dict[str, float] = field(
         default_factory=lambda: {
-            'dist_threshold': 25,
+            'dist_threshold': 40,
             'angle_threshold': math.radians(90),
         }
     ) # robot can score if satisfy distance and angle thesholds to the scoring position of the goal.
     loader_pickup_hitbox: dict[str, float] = field(
         default_factory=lambda: {
-            'dist_threshold': 25, # cm
+            'dist_threshold': 40, # cm
             'angle_threshold': math.radians(90), 
         }
     ) # robot can pick up loader if satisfy distance and angle thesholds.
@@ -54,7 +54,7 @@ class VexConfig:
 
     steps_per_iteration: int = 8
     train_device: str = 'cuda:0'
-    lr: float = 1e-5
+    lr: float = 5e-5
     update_league: int = 10
 
     # GAE

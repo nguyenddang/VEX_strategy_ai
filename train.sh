@@ -6,7 +6,7 @@
 #SBATCH -p short               # 
 #SBATCH -t 23:00:00            # 
 #SBATCH --gres=gpu:1           # 
-#SBATCH -C "H200|H100"              #
+#SBATCH -C "H200"              #
 
 module load cuda         # 
 source .venv/bin/activate  #

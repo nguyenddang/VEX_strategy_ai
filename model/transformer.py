@@ -1,3 +1,5 @@
+import math
+
 from config import VexConfig
 import torch 
 import torch.nn as nn
@@ -23,7 +25,7 @@ class Attention(nn.Module):
             self.v_cache = torch.cat([self.v_cache, v], dim=2)[:, :, -self.config.block_size:, :]
         return self.k_cache, self.v_cache
     
-    def reset_cv_cache(self):
+    def reset_kv_cache(self):
         self.k_cache = None
         self.v_cache = None
 
@@ -70,8 +72,8 @@ class Transformer(nn.Module):
         super().__init__()
         self.config = config
 
+        self.register_buffer("wpe", self.get_sinusoidal_encoding())
         self.transformers = nn.ModuleDict(dict(
-            wpe = nn.Embedding(config.block_size, config.n_embd),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = nn.LayerNorm(config.n_embd), 
         ))
@@ -84,14 +86,23 @@ class Transformer(nn.Module):
     def forward(self, x, attn_mask):
         B, T, C = x.size()
         positions = torch.arange(T, device=x.device) # (1, T)
-        position_embd = self.transformers.wpe(positions) # (1, T, n_embd)
+        position_embd = self.wpe[positions] # (1, T, n_embd)
         x = x + position_embd # (B, T, n_embd)
 
         for block in self.transformers.h:
             x = block(x, attn_mask=attn_mask)
         
-        x = self.transformers.ln_f(x) # (B, T, n_embd)
         x = x[:, -1, :]
+        x = self.transformers.ln_f(x) # (B, T, n_embd)
         policy_logits = self.policy_head(x) # (B, T, action_size)
         value_logits = self.value_head(x) # (B, T, 1)
         return policy_logits, value_logits
+    
+    def get_sinusoidal_encoding(self, ):
+        pe = torch.zeros(self.config.block_size, self.config.n_embd)
+        position = torch.arange(0, self.config.block_size, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, self.config.n_embd, 2).float() * (-math.log(10000.0) / self.config.n_embd))
+        
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        return pe # (block_size, n_embd)

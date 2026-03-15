@@ -39,6 +39,7 @@ def worker_decentralized_fn(
         'log_probs': torch.zeros((2, config.max_actions), dtype=torch.float32),
         'learner_versions': torch.zeros((config.max_actions,), dtype=torch.float32),
         'red_score': torch.zeros((1,), dtype=torch.float32),
+        'blue_score': torch.zeros((1,), dtype=torch.float32),
     }
     print(f"Worker {worker_id} started.", flush=True)
     while True:
@@ -94,13 +95,14 @@ def worker_decentralized_fn(
             local_buffer['rewards'][0, timestep] = env_out['rewards']['robot_red']
             local_buffer['rewards'][1, timestep] = env_out['rewards']['robot_blue']
 
-            done, legal_actions, observations, rewards, timestep, red_score = \
-                env_out['done'], env_out['legal_actions'], env_out['observations'], env_out['rewards'], env_out['timestep'], env_out['score']['robot_red']
+            done, legal_actions, observations, rewards, timestep = \
+                env_out['done'], env_out['legal_actions'], env_out['observations'], env_out['rewards'], env_out['timestep']
 
-        local_buffer['red_score'][0] = red_score
+        local_buffer['red_score'][0] = env_out['score']['robot_red']
+        local_buffer['blue_score'][0] = env_out['score']['robot_blue']
+
         delta = 0.01/(n * p)
         red_won = env_out['score']['robot_red'] > env_out['score']['robot_blue']
         if red_won:
             league.update_quality(opp_idx, delta)
-        print(f"[Worker {worker_id}]: Learner {worker_learner_version} Opp {opp_idx} - Score: {env_out['score']['robot_red']} -  {env_out['score']['robot_blue']} - {'RED WON' if red_won else 'BLUE WON'} - Quality Delta: {delta:.4f}", flush=True)
         buffer.push_to_buffer(local_buffer)
