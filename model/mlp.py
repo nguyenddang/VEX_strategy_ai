@@ -21,8 +21,9 @@ class MLP(nn.Module):
         self.value_head = nn.Sequential(
             nn.Linear(config.n_embd*2, config.n_embd),
             nn.GELU(),
-            nn.LayerNorm(config.n_embd),
-            nn.Linear(config.n_embd, 1)
+            nn.Linear(config.n_embd, config.n_embd//2),
+            nn.GELU(),
+            nn.Linear(config.n_embd // 2, 1)
         )
         self.config = config
         print(f"MLP initialized with {sum(p.numel() for p in self.parameters())/1e6:.2f}M parameters.")

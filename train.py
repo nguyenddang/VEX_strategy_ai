@@ -16,9 +16,10 @@ if __name__ == "__main__":
     config.n_embd = 256
     config.n_save_learner_ckpts = 250
     config.n_save_all_ckpts = 25
-    config.log_wandb = False
+    config.log_wandb = True
     config.mini_train_episodes = 32 if torch.cuda.get_device_name(0).split(' ')[-1] == 'H200' else 32
     config.steps_per_iteration = 16
+    config.update_league = 5
     config.save_ckpt_path = "checkpoints_0"
     config.compile = True 
     print(f"Using device: {torch.cuda.get_device_name(0)}")
