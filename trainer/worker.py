@@ -29,19 +29,20 @@ def worker_decentralized_fn(
     opponent_model.eval() 
     worker_learner_version = league.learner_version.value
     local_buffer = {
-        'core_obs': torch.zeros((2, config.max_actions, config.core_obs_dim), dtype=torch.float32),
-        'ball_obs': torch.zeros((2, config.max_actions, config.n_balls, config.ball_obs_dim), dtype=torch.float32),
-        'legal_masks': torch.zeros((2, config.max_actions, config.n_primary_actions), dtype=torch.bool),
-        'rewards': torch.zeros((2, config.max_actions), dtype=torch.float32),
-        'actions': torch.zeros((2, config.max_actions, 4), dtype=torch.long),
-        'values': torch.zeros((2, config.max_actions + 1), dtype=torch.float32),
-        'move_masks': torch.zeros((2, config.max_actions), dtype=torch.bool),
-        'log_probs': torch.zeros((2, config.max_actions), dtype=torch.float32),
-        'learner_versions': torch.zeros((config.max_actions,), dtype=torch.float32),
+        'core_obs': torch.zeros((config.max_actions, config.core_obs_dim), dtype=torch.float32),
+        'ball_obs': torch.zeros((config.max_actions, config.n_balls, config.ball_obs_dim), dtype=torch.float32),
+        'legal_masks': torch.zeros((config.max_actions, config.n_primary_actions), dtype=torch.bool),
+        'rewards': torch.zeros((config.max_actions), dtype=torch.float32),
+        'actions': torch.zeros((config.max_actions, 4), dtype=torch.long),
+        'values': torch.zeros((config.max_actions + 1), dtype=torch.float32),
+        'move_masks': torch.zeros((config.max_actions,), dtype=torch.bool),
+        'log_probs': torch.zeros((config.max_actions,), dtype=torch.float32),
+        'learner_versions': torch.zeros((1,), dtype=torch.float32),
         'red_score': torch.zeros((1,), dtype=torch.float32),
         'blue_score': torch.zeros((1,), dtype=torch.float32),
     }
     print(f"Worker {worker_id} started.", flush=True)
+    learner_key, opp_key = 'robot_red', 'robot_blue'
     while True:
         opp_idx, p, n, param = league.sample_opponent(worker_id)
         # load opponent and learner parameters
@@ -61,39 +62,36 @@ def worker_decentralized_fn(
             env_out['done'], env_out['legal_actions'], env_out['observations'], env_out['rewards'], env_out['timestep']
         
         while not done:
-            for p_idx, robot_key in enumerate(['robot_red', 'robot_blue']):
-                local_buffer['core_obs'][p_idx, timestep].copy_(observations[robot_key]['core_obs'])
-                local_buffer['ball_obs'][p_idx, timestep].copy_(observations[robot_key]['ball_obs'])
-                local_buffer['legal_masks'][p_idx, timestep].copy_(legal_actions[robot_key])
+            local_buffer['core_obs'][timestep].copy_(observations[learner_key]['core_obs'])
+            local_buffer['ball_obs'][timestep].copy_(observations[learner_key]['ball_obs'])
+            local_buffer['legal_masks'][timestep].copy_(legal_actions[learner_key])
+            
             with torch.no_grad():
-                # learner inference
                 learner_out = learner_model(
-                    local_buffer['core_obs'][:, [timestep]], # (2, some size of block, core_obs_dim)
-                    local_buffer['ball_obs'][:, [timestep]], # (2, some size of block, n_balls, ball_obs_dim)
-                    local_buffer['legal_masks'][:, timestep], # (2, some size of block, n_primary_actions)
-                    do_inference=True)
+                    observations[learner_key]['core_obs'].view(1, 1, -1), # (1, 1, core_obs_dim)
+                    observations[learner_key]['ball_obs'].view(1, 1, config.n_balls, -1), # (1, 1, n_balls, ball_obs_dim)
+                    legal_actions[learner_key].view(1, -1), # (1, n_primary_actions)
+                    do_inference=True
+                )
                 opponent_out = opponent_model(
-                    local_buffer['core_obs'][1, [timestep]].unsqueeze(0), # (1, some size of block, core_obs_dim)
-                    local_buffer['ball_obs'][1, [timestep]].unsqueeze(0), # (1, some size of block, n_balls, ball_obs_dim)
-                    local_buffer['legal_masks'][1, timestep].unsqueeze(0), # (1, some size of block, n_primary_actions)
+                    observations[opp_key]['core_obs'].view(1, 1, -1), # (1, 1, core_obs_dim)
+                    observations[opp_key]['ball_obs'].view(1, 1, config.n_balls, -1), # (1, 1, n_balls, ball_obs_dim)
+                    legal_actions[opp_key].view(1, -1), # (1, n_primary_actions)
                     do_inference=True
                 )
             # copy outputs to local buffer 
-            local_buffer['actions'][0, timestep] = learner_out['actions'][0]
-            local_buffer['actions'][1, timestep] = opponent_out['actions'][0]
-            local_buffer['values'][:, timestep] = learner_out['values']
-            local_buffer['move_masks'][0, timestep] = learner_out['move_mask'][0]
-            local_buffer['move_masks'][1, timestep] = opponent_out['move_mask'][0]
-            local_buffer['log_probs'][0, timestep] = learner_out['log_prob'][0]
-            local_buffer['log_probs'][1, timestep] = opponent_out['log_prob'][0]
+            local_buffer['actions'][timestep].copy_(learner_out['actions'][0])
+            local_buffer['values'][timestep].copy_(learner_out['values'][0])
+            local_buffer['move_masks'][timestep].copy_(learner_out['move_mask'][0])
+            local_buffer['log_probs'][timestep].copy_(learner_out['log_prob'][0])
+            
             act = {
                 'robot_red': learner_out['actions'][0].tolist(),
                 'robot_blue': opponent_out['actions'][0].tolist(),
             }
             env_out = env.step(act)
             # save reward
-            local_buffer['rewards'][0, timestep] = env_out['rewards']['robot_red']
-            local_buffer['rewards'][1, timestep] = env_out['rewards']['robot_blue']
+            local_buffer['rewards'][timestep] = env_out['rewards']['robot_red']
 
             done, legal_actions, observations, rewards, timestep = \
                 env_out['done'], env_out['legal_actions'], env_out['observations'], env_out['rewards'], env_out['timestep']

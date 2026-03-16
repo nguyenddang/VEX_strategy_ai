@@ -41,11 +41,6 @@ class Trainer:
         self.temp_pad_ball_obs = torch.zeros((config.block_size - 1, config.n_balls, config.ball_obs_dim), dtype=torch.float32, device=config.train_device)
         self.temp_pad_ball_obs = self.temp_pad_ball_obs.unsqueeze(0)
 
-        train_mask = torch.zeros(self.config.mini_train_episodes, 2, self.max_actions + self.block_size - 1, device=self.train_device, dtype=torch.bool)
-        train_mask[:, 0] = 1
-        train_mask = train_mask.view(-1, self.max_actions + self.block_size - 1).unfold(1, self.block_size, 1)
-        self.train_mask = train_mask[:, :, 0].reshape(-1)
-
         # gae config
         self.gamma = config.gamma
         self.lam = config.lam
@@ -67,7 +62,8 @@ class Trainer:
         self.optimizer = torch.optim.AdamW(self.learner.parameters(), lr=config.lr)
 
         if config.resume_training:
-            self.load_state_dict(config.load_ckpt_path)
+            ckpt = torch.load(config.load_ckpt_path)
+            self.load_state_dict(ckpt)
         else:
             self.league.update_learner_param(self.learner)
             self.league.update_latest_snapshot(self.learner)
@@ -103,31 +99,24 @@ class Trainer:
 
     def _get_advantage(self, rewards: torch.Tensor, values: torch.Tensor):
         """
-        reward: batch_size, 2, chunk_size
-        values: batch_size, 2, chunk_size + 1
+        reward: batch_size, total_timesteps
+        values: batch_size, total_timesteps + 1
         """
         advantages = torch.zeros_like(rewards).float()
-        gae = torch.zeros((rewards.shape[0], rewards.shape[1]), device=self.train_device)
-        for t in reversed(range(rewards.shape[2])):
-            delta = rewards[:, :, t] + self.gamma * values[:, :, t + 1] - values[:, :, t]
+        gae = torch.zeros((rewards.shape[0],), device=self.train_device)
+        for t in reversed(range(rewards.shape[1])):
+            delta = rewards[:, t] + self.gamma * values[:, t + 1] - values[:, t]
             gae = delta + self.gamma * self.lam * gae
-            advantages[:, :, t] = gae
+            advantages[:, t] = gae
         return advantages
     
-    def _get_loss(self, values, values_old, ratios, advantages, returns, train_mask,
+    def _get_loss(self, values, ratios, advantages, returns,
                   p_dist: Categorical, x_dist: Categorical, y_dist: Categorical, theta_dist: Categorical, move_masks: torch.Tensor):
-        value_loss = torch.max(
-            F.mse_loss(values, returns, reduction='none'),
-            F.mse_loss(
-                torch.clamp(values, values_old - self.value_epsilon, values_old + self.value_epsilon),
-                returns,
-                reduction='none')).mean()
-        rt = ratios[train_mask]
-        adv = advantages[train_mask]
+        value_loss = F.mse_loss(values, returns, reduction='mean')
         policy_loss = -torch.min(
-            rt * adv,
-            torch.clamp(rt, 1.0 - self.policy_epsilon, 1.0 + self.policy_epsilon) * adv).mean()
-        entropy_bonus = (p_dist.entropy() + move_masks * (x_dist.entropy() + y_dist.entropy() + theta_dist.entropy()))[train_mask].mean()
+            ratios * advantages,
+            torch.clamp(ratios, 1.0 - self.policy_epsilon, 1.0 + self.policy_epsilon) * advantages).mean()
+        entropy_bonus = (p_dist.entropy() + move_masks * (x_dist.entropy() + y_dist.entropy() + theta_dist.entropy())).mean()
         total_loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy_bonus
         return total_loss, policy_loss, value_loss, entropy_bonus
 
@@ -141,46 +130,43 @@ class Trainer:
             "adv_mean": 0.0,
             "adv_std": 0.0,
             "red_reward": 0.0,
-            "n_scoring": 0.0,
-            "n_pickup_loaders": 0.0,
-            "n_pickup_ground": 0.0,
-            "n_block": 0.0,
             "red_score": 0.0,
             "blue_score": 0.0,
+            'action_percentage': torch.zeros((self.n_primary_actions,), dtype=torch.float32),
         }
-
+        denom = self.steps_per_iteration * self.grad_accumulation_steps
         for step in range(self.steps_per_iteration):
             for g_step in range(self.grad_accumulation_steps):
                 batch = self.buffer.pull_from_buffer()
-                core_obs = batch['core_obs'].pin_memory().to(self.train_device, non_blocking=True).view(-1, self.total_timesteps, self.core_obs_dim) # B * 2, total_timesteps, core_obs_dim
-                ball_obs = batch['ball_obs'].pin_memory().to(self.train_device, non_blocking=True).view(-1, self.total_timesteps, self.n_balls, self.ball_obs_dim) # B * 2, total_timesteps, n_balls, ball_obs_dim
-                legal_masks = batch['legal_masks'].pin_memory().to(self.train_device, non_blocking=True).view(-1, self.n_primary_actions) # B * 2 * total_timesteps, n_primary_actions
-                actions = batch['actions'].pin_memory().to(self.train_device, non_blocking=True).view(-1, 4)
-                rewards = batch['rewards'].pin_memory().to(self.train_device, non_blocking=True)
-                values = batch['values'].pin_memory().to(self.train_device, non_blocking=True)
+                core_obs = batch['core_obs'].pin_memory().to(self.train_device, non_blocking=True) # B, total_timesteps, core_obs_dim
+                ball_obs = batch['ball_obs'].pin_memory().to(self.train_device, non_blocking=True) # B , total_timesteps, n_balls, ball_obs_dim
+                legal_masks = batch['legal_masks'].pin_memory().to(self.train_device, non_blocking=True).view(-1, self.n_primary_actions) # B * total_timesteps, n_primary_actions
+                actions = batch['actions'].pin_memory().to(self.train_device, non_blocking=True).view(-1, 4) # B * total_timesteps, 4
+                rewards = batch['rewards'].pin_memory().to(self.train_device, non_blocking=True) # B, total_timesteps
+                values = batch['values'].pin_memory().to(self.train_device, non_blocking=True) # B, total_timesteps + 1
                 move_masks = batch['move_masks'].pin_memory().to(self.train_device, non_blocking=True).view(-1) # B * 2 * total_timesteps
                 log_probs = batch['log_probs'].pin_memory().to(self.train_device, non_blocking=True).view(-1) # B * 2 * total_timesteps
                 accum_learner_versions += batch['learner_versions'].mean().item()
-                red_score = batch['red_score']
-                blue_score = batch['blue_score']
+                red_score = batch['red_score'].mean().item()
+                blue_score = batch['blue_score'].mean().item()
 
                 # pad observations and create batches of block size
                 pad_core_obs = self.temp_pad_core_obs.expand(core_obs.shape[0], -1, -1)
                 pad_ball_obs = self.temp_pad_ball_obs.expand(ball_obs.shape[0], -1, -1, -1)
-                core_obs = torch.cat([pad_core_obs, core_obs], dim=1) # B*2, timesteps+block_size-1, core_obs_dim
-                ball_obs = torch.cat([pad_ball_obs, ball_obs], dim=1) # concatenate over timesteps
+                core_obs = torch.cat([pad_core_obs, core_obs], dim=1) # B, timesteps+block_size-1, core_obs_dim
+                ball_obs = torch.cat([pad_ball_obs, ball_obs], dim=1) # B, timesteps+block_size-1, n_balls, ball_obs_dim
 
-                core_obs = core_obs.unfold(1, self.block_size, 1).transpose(2, 3).reshape(-1, self.block_size, self.core_obs_dim) # B*2, timesteps, block_size, core_obs_dim -> B*2*timesteps, block_size, core_obs_dim
-                ball_obs = ball_obs.unfold(1, self.block_size, 1).transpose(3, 4).transpose(2, 3).reshape(-1, self.block_size, self.n_balls, self.ball_obs_dim) # B*2, timesteps, n_balls, ball_obs_dim, block_size -> B*2*timesteps, block_size, n_balls, ball_obs_dim
-
+                # Unfolding:
+                # core_obs: B, timesteps+block_size-1, core_obs_dim -> B*timesteps, block_size, core_obs_dim
+                # ball_obs: B, timesteps+block_size-1, n_balls, ball_obs_dim -> B*timesteps, block_size, n_balls, ball_obs_dim
+                core_obs = core_obs.unfold(1, self.block_size, 1).transpose(2, 3).reshape(-1, self.block_size, self.core_obs_dim)
+                ball_obs = ball_obs.unfold(1, self.block_size, 1).transpose(3, 4).transpose(2, 3).reshape(-1, self.block_size, self.n_balls, self.ball_obs_dim)
                 with torch.no_grad():
-                    advantages = self._get_advantage(rewards, values)
-                    returns = advantages + values[:, :, :-1]
-                    advantages = advantages.view(-1)
-                    adv_mean = advantages[self.train_mask].mean()
-                    adv_std = advantages[self.train_mask].std() + 1e-8
-                    advantages = (advantages - adv_mean) / adv_std
-
+                    advantages = self._get_advantage(rewards, values) # B, total_timesteps
+                    returns = (advantages + values[:, :-1]).view(-1) # B * total_timesteps
+                    adv_mean = advantages.mean()
+                    adv_std = advantages.std() + 1e-8
+                    advantages = (advantages.view(-1) - adv_mean) / adv_std # B * total_timesteps
                 with torch.autocast(device_type=self.train_device, dtype=torch.bfloat16, enabled=(self.train_device == 'cuda:0')):
                     outputs = self.learner(core_obs, ball_obs, legal_masks, do_inference=False)
                     p_dist = Categorical(logits=outputs["primary_action_logits"])
@@ -194,30 +180,24 @@ class Trainer:
                     new_log_probs = p_prob + move_masks * (x_prob + y_prob + theta_prob)
                     ratios = torch.exp(new_log_probs - log_probs)
                     new_values = outputs["value_logits"].squeeze(-1)
-                    values = values[:, :, :-1].contiguous().view(-1)
 
                     loss, policy_loss, value_loss, entropy_bonus = self._get_loss(
-                        new_values, values, ratios, advantages, returns.view(-1), self.train_mask,
+                        new_values, ratios, advantages, returns,
                         p_dist, x_dist, y_dist, theta_dist, move_masks
                     )
                     loss /= self.grad_accumulation_steps
                 loss.backward()
+                iteration_batch['policy_loss'] += policy_loss.item() / denom
+                iteration_batch['value_loss'] += value_loss.item() / denom
+                iteration_batch['entropy_bonus'] += entropy_bonus.item() / denom
+                iteration_batch['adv_mean'] += adv_mean.item() / denom
+                iteration_batch['adv_std'] += adv_std.item() / denom
+                iteration_batch['red_score'] += red_score / denom
+                iteration_batch['blue_score'] += blue_score / denom
+                iteration_batch['action_percentage'] += torch.bincount(actions[:, 0].cpu(), minlength=self.n_primary_actions).float() / (actions.shape[0] * denom)
             norm = torch.nn.utils.clip_grad_norm_(self.learner.parameters(), max_norm=1.0)
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
-            # calculate the percentage of primary actions in the batch 
-            n_move = (actions[self.train_mask][:, 0] == 0).sum().item()
-            n_total = self.train_mask.sum().item()
-            move_percentage = n_move / n_total if n_total > 0 else 0.
-            n_score = (actions[self.train_mask][:, 0] == 3).sum().item()
-            score_percentage = n_score / n_total if n_total > 0 else 0
-            n_block = (actions[self.train_mask][:, 0] == 4).sum().item()
-            block_percentage = n_block / n_total if n_total > 0 else 0
-            n_pickup_loaders = (actions[self.train_mask][:, 0] == 1).sum().item()
-            pickup_loaders_percentage = n_pickup_loaders / n_total if n_total > 0 else 0
-            n_pickup_ground = (actions[self.train_mask][:, 0] == 2).sum().item()
-            pickup_ground_percentage = n_pickup_ground / n_total if n_total > 0 else 0
-            # print(f"Step {step}: Move {move_percentage:.2%}, Score {score_percentage:.2%}, Block {block_percentage:.2%}, Pickup Loaders {pickup_loaders_percentage:.2%}, Pickup Ground {pickup_ground_percentage:.2%}", flush=True)
             print(f"Step {step}: Loss {(self.grad_accumulation_steps * loss).item():.4f}, \
 Policy Loss {policy_loss.item():.4f}, \
 Value Loss {value_loss.item():.4f}, \
@@ -225,21 +205,8 @@ Entropy Bonus {entropy_bonus.item():.4f}, \
 Grad Norm {norm:.4f}, \
 Adv Mean {adv_mean.item():.4f}, \
 Adv Std {adv_std.item():.4f}, \
-Red Reward Mean {rewards[:, 0].sum(-1).mean().item():.4f} \
-Red Score {red_score.mean().item():.4f} \
-Blue Score {blue_score.mean().item():.4f}", flush=True)
-            
-            # logging
-            iteration_batch["policy_loss"] += policy_loss.item() / self.steps_per_iteration # +
-            iteration_batch["value_loss"] += value_loss.item() / self.steps_per_iteration # +
-            iteration_batch["entropy_bonus"] += entropy_bonus.item() / self.steps_per_iteration # +
-            iteration_batch["grad_norm"] += norm / self.steps_per_iteration # +
-            iteration_batch["adv_mean"] += adv_mean.item() / self.steps_per_iteration # +
-            iteration_batch["adv_std"] += adv_std.item() / self.steps_per_iteration # +
-            iteration_batch["red_reward"] += rewards[:, 0].sum().item() / self.steps_per_iteration # + | this is per single timestep reward for red, not episode reward
-            iteration_batch["red_score"] += red_score.sum().item() / (self.steps_per_iteration * self.mini_train_episodes) # + | this is at the end of a single episode, so this is just a single episode
-            iteration_batch["blue_score"] += blue_score.sum().item() / (self.steps_per_iteration * self.mini_train_episodes) # + ...
-
+Red Score {red_score:.4f} \
+Blue Score {blue_score:.4f}", flush=True)
         return accum_learner_versions / (self.steps_per_iteration * self.grad_accumulation_steps), iteration_batch
 
 
@@ -266,6 +233,12 @@ Blue Score {blue_score.mean().item():.4f}", flush=True)
 
                 # logging
                 if self.log_wandb:
+                    iteration_batch['move%'] = iteration_batch['action_percentage'][0].item()
+                    iteration_batch['pick_loader%'] = iteration_batch['action_percentage'][1].item()
+                    iteration_batch['pick_ground%'] = iteration_batch['action_percentage'][2].item()
+                    iteration_batch['score%'] = iteration_batch['action_percentage'][3].item()
+                    iteration_batch['block%'] = iteration_batch['action_percentage'][4].item()
+                    del iteration_batch['action_percentage']
                     wandb.log(iteration_batch | sample_reuse_batch | {"staleness": (M-N), "optimizing_version": M, "average_learner_version_in_batch": N}, step=self.iteration)
 
                 # saving ckpts
@@ -310,11 +283,20 @@ Blue Score {blue_score.mean().item():.4f}", flush=True)
         self.learner.load_state_dict(state_dict['model'])
         self.optimizer.load_state_dict(state_dict['optim'])
         self.iteration = state_dict['iteration']
-        # self.config = VexConfig(**state_dict['config'])
+
+        # need to move optimizer states to the correct device (torch did it the lazy way)
+        for state in self.optimizer.state.values():
+            for key, value in state.items():
+                if isinstance(value, torch.Tensor):
+                    state[key] = value.to(self.train_device, non_blocking=True)
     
     def load_state_dict(self, state_dict):
-        self.load_state_dict_learner(state_dict['learner'])
-        self.league.load_state_dict(state_dict['league'])
+        self.load_state_dict_learner(state_dict)
+        self.league.load_state_dict(state_dict, self.learner)
+    
+    def load_state_dict(self, state_dict):
+        self.load_state_dict_learner(state_dict)
+        self.league.load_state_dict(state_dict, self.learner)
 
     def get_sample_reuse(self, dt, iteration):
         with self.buffer.sample_produced.get_lock():

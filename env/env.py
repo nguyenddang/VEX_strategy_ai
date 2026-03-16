@@ -101,10 +101,9 @@ class VexEnv:
                 x_idx = action[player][1]
                 y_idx = action[player][2]
                 theta_idx = action[player][3]
-
-                delta_x = (x_idx - (self.main_config.N - 1) / 2) * (2.0 * self.main_config.max_offset / (self.main_config.N - 1))
-                delta_y = (y_idx - (self.main_config.N - 1) / 2) * (2.0 * self.main_config.max_offset / (self.main_config.N - 1))
-                delta_theta = (theta_idx - (self.main_config.K - 1) / 2) * (2.0 * math.pi / (self.main_config.K - 1))
+                delta_x = (x_idx - (self.main_config.N  + 1) / 2) * (2.0 * self.main_config.max_offset / (self.main_config.N - 1))
+                delta_y = (y_idx - (self.main_config.N  + 1) / 2) * (2.0 * self.main_config.max_offset / (self.main_config.N - 1))
+                delta_theta = (theta_idx - (self.main_config.K + 1) / 2) * (2.0 * math.pi / (self.main_config.K - 1))
                 target_x = robot.body.position.x + delta_x
                 target_y = robot.body.position.y + delta_y
                 target_theta = robot.body.angle + delta_theta
@@ -183,21 +182,21 @@ class VexEnv:
         done: bool,
     ):
         reward_red, reward_blue = 0, 0
-        reward_red += (post_red_score - prev_red_score) * 0.5
-        reward_red += 1.0 if post_red_inven > prev_red_inven else 0 # incentivize pickup
-        reward_blue += (post_blue_score - prev_blue_score) * 0.5
-        reward_blue += 1.0 if post_blue_inven > prev_blue_inven else 0 # incentivize pickup
+        reward_red += (post_red_score - prev_red_score) * 0.2
+        reward_red += 0.2 if post_red_inven > prev_red_inven else 0 # incentivize pickup
+        reward_blue += (post_blue_score - prev_blue_score) * 0.2
+        reward_blue += 0.2 if post_blue_inven > prev_blue_inven else 0 # incentivize pickup
         if done:
             if post_red_score > post_blue_score:
                 reward_red += 5.0
                 score_diff = post_red_score - post_blue_score
                 # bonus for winning by larger margin
-                reward_red += 0.1 * score_diff
+                reward_red += 0.01 * score_diff
             elif post_blue_score > post_red_score:
                 reward_blue += 5.0
                 score_diff = post_blue_score - post_red_score
                 # bonus for winning by larger margin
-                reward_blue += 0.1 * score_diff
+                reward_blue += 0.01 * score_diff
 
         temp = reward_red
         reward_red = reward_red - reward_blue

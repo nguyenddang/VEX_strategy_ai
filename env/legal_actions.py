@@ -71,7 +71,7 @@ class LegalActionResolver:
                 loader.cache_pose['position'][0] - loading_position[0],
             )
             within_loader_hitbox = (
-                relative["distance"] <= loader_dist_threshold and abs(relative["delta_theta"]) <= loader_angle_threshold
+                relative["distance"] <= loader_dist_threshold and abs(relative["delta_theta"]) <= loader_angle_threshold and len(robot.inventory) < robot.capacity
             )
             if not within_loader_hitbox:
                 continue

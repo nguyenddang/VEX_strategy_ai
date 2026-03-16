@@ -13,18 +13,17 @@ class SharedBuffer:
         self.buffer_capacity = config.buffer_capacity
         self.max_actions = config.max_actions
         self.mini_train_episodes = config.mini_train_episodes
-        # 2 for red/blue robot. 
         # values: max_actions + 1 for bootstrapping value of last state.
         self.buffer = {
-            'core_obs': torch.zeros((self.buffer_capacity, 2, self.max_actions, config.core_obs_dim), dtype=torch.float32).share_memory_(),
-            'ball_obs': torch.zeros((self.buffer_capacity, 2, self.max_actions, config.n_balls, config.ball_obs_dim), dtype=torch.float32).share_memory_(),
-            'legal_masks': torch.zeros((self.buffer_capacity, 2, self.max_actions, config.n_primary_actions), dtype=torch.bool).share_memory_(),
-            'actions': torch.zeros((self.buffer_capacity, 2, self.max_actions, 4), dtype=torch.long).share_memory_(),
-            'rewards': torch.zeros((self.buffer_capacity, 2, self.max_actions), dtype=torch.float32).share_memory_(),
-            'values': torch.zeros((self.buffer_capacity, 2, self.max_actions + 1), dtype=torch.float32).share_memory_(),
-            'move_masks': torch.zeros((self.buffer_capacity, 2, self.max_actions), dtype=torch.bool).share_memory_(),
-            'log_probs': torch.zeros((self.buffer_capacity, 2, self.max_actions), dtype=torch.float32).share_memory_(),
-            'learner_versions': torch.zeros((self.buffer_capacity, self.max_actions), dtype=torch.float32).share_memory_(), # TODO: change this to take only a single version instead of the the total episodes
+            'core_obs': torch.zeros((self.buffer_capacity, self.max_actions, config.core_obs_dim), dtype=torch.float32).share_memory_(),
+            'ball_obs': torch.zeros((self.buffer_capacity, self.max_actions, config.n_balls, config.ball_obs_dim), dtype=torch.float32).share_memory_(),
+            'legal_masks': torch.zeros((self.buffer_capacity, self.max_actions, config.n_primary_actions), dtype=torch.bool).share_memory_(),
+            'actions': torch.zeros((self.buffer_capacity, self.max_actions, 4), dtype=torch.long).share_memory_(),
+            'rewards': torch.zeros((self.buffer_capacity, self.max_actions), dtype=torch.float32).share_memory_(),
+            'values': torch.zeros((self.buffer_capacity, self.max_actions + 1), dtype=torch.float32).share_memory_(),
+            'move_masks': torch.zeros((self.buffer_capacity, self.max_actions), dtype=torch.bool).share_memory_(),
+            'log_probs': torch.zeros((self.buffer_capacity, self.max_actions), dtype=torch.float32).share_memory_(),
+            'learner_versions': torch.zeros((self.buffer_capacity, 1), dtype=torch.float32).share_memory_(), 
             'red_score': torch.zeros((self.buffer_capacity, 1), dtype=torch.float32).share_memory_(),
             'blue_score': torch.zeros((self.buffer_capacity, 1), dtype=torch.float32).share_memory_(),
         }
@@ -138,17 +137,16 @@ class SharedLeague:
             "opp_bank": self.opp_bank.clone(),
             "opp_qualities": self.opp_qualities.clone(),
             "opp_just_updated": self.opp_just_updated.clone(),
-            "learner_param": self.learner_param.clone(),
-            "learner_version": self.learner_version.value
         }
     
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict, learner: GeniusFormer):
         with self.opp_lock:
             self.latest_opp_idx.value = state_dict["latest_opp_idx"]
             self.opp_bank.copy_(state_dict["opp_bank"])
             self.opp_qualities.copy_(state_dict["opp_qualities"])
             self.opp_just_updated.copy_(state_dict["opp_just_updated"])
         with self.learner_lock:
-            self.learner_param.copy_(state_dict["learner_param"])
-            self.learner_version.value = state_dict["learner_version"]
+            param = torch.nn.utils.parameters_to_vector(learner.parameters()).detach().cpu()
+            self.learner_param.copy_(param)
+            self.learner_version.value = state_dict["iteration"]
             

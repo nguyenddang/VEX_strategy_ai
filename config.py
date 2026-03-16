@@ -13,8 +13,8 @@ class VexConfig:
     render_hz: float = 60.0
     realtime_render: bool = True
     max_duration_s: float = 120.0
-    max_offset: float = 30.0 # in cm. max relative MOVE extent in x/y from current robot position.
-    N: int = 31 # number of bins per axis for MOVE grid around robot.
+    max_offset: float = 20.0 # in cm. max relative MOVE extent in x/y from current robot position.
+    N: int = 21 # number of bins per axis for MOVE grid around robot.
     K: int = 73 # number of bins for relative heading change in MOVE.
     render_mode: str | None = None
     window_width: int = 1200
@@ -54,7 +54,7 @@ class VexConfig:
 
     steps_per_iteration: int = 8
     train_device: str = 'cuda:0'
-    lr: float = 5e-5
+    lr: float = 1e-4
     update_league: int = 10
 
     # GAE

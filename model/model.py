@@ -50,8 +50,8 @@ class GeniusFormer(nn.Module):
         pads[:self.config.block_size - 1] = 0
         padding_mask = pads.unfold(0, self.config.block_size, 1)
         padding_mask = padding_mask.unsqueeze(1).expand(-1, self.config.block_size, -1).unsqueeze(0)
-        attn_mask = causal_mask & padding_mask
-        attn_mask = attn_mask.expand(self.config.mini_train_episodes*2, -1, -1, -1).contiguous().view(-1, 1, self.config.block_size, self.config.block_size)
+        attn_mask = causal_mask & padding_mask 
+        attn_mask = attn_mask.expand(self.config.mini_train_episodes, -1, -1, -1).contiguous().view(-1, 1, self.config.block_size, self.config.block_size)
         return attn_mask
     
     def reset_kv_cache(self):
@@ -64,7 +64,6 @@ class GeniusFormer(nn.Module):
         ball_obs (ball entities): (B, T, n_balls, ball_obs_dim)
         legal_masks: (B, T, n_primary_actions)
         """
-
         if do_inference:
             if self.attn_mask is not None:
                 delattr(self, "attn_mask")
