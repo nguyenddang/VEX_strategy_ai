@@ -260,14 +260,14 @@ class Goal:
             out_dx = output_pos[0] - self.cache_pose['position'][0]
             out_dy = output_pos[1] - self.cache_pose['position'][1]
             out_dist = math.hypot(out_dx, out_dy)
-            out_x = out_dx / out_dist if out_dist > 1e-8 else math.cos(self.cache_pose['angle']) * random.uniform(0, 4)
-            out_y = out_dy / out_dist if out_dist > 1e-8 else math.sin(self.cache_pose['angle']) * random.uniform(0, 4)
-            eject_distance = self.width / 2 + self.ball_config['radius'] * 1.25
+            out_x = out_dx  / out_dist if out_dist > 1e-8 else math.cos(self.cache_pose['angle'])
+            out_y = out_dy  / out_dist if out_dist > 1e-8 else math.sin(self.cache_pose['angle'])
+            eject_distance = self.width / 2 + self.ball_config['radius'] * 1.25 
             ejected_ball.body.position = (
-                self.cache_pose['position'][0] + out_x * eject_distance,
-                self.cache_pose['position'][1] + out_y * eject_distance,
+                self.cache_pose['position'][0] + (out_x) * (eject_distance + random.uniform(4, 16)),
+                self.cache_pose['position'][1] + (out_y + random.uniform(-0.1, 0.1)) * (eject_distance + random.uniform(4, 16)),
             )
-            ejected_ball.body.velocity = (0, 0)
+            ejected_ball.body.velocity = (out_x * 100, out_y * 100)
             ejected_ball.body.angular_velocity = 0
             goal_space.add(ejected_ball.body, ejected_ball.shape)
 
@@ -515,15 +515,15 @@ class Loader:
             picked_ball.loader_level = -1.0
             robot.inventory.append(picked_ball)
         else:
-            drop_distance = self.robot_config['size'] / 2 + self.ball_config['radius'] * 1.25 + random.uniform(0, 4)
+            drop_distance = self.robot_config['size'] / 2 + self.ball_config['radius'] * 1.25
             behind_x = -math.cos(robot.body.angle)
             behind_y = -math.sin(robot.body.angle)
             picked_ball.state = "ground"
             picked_ball.body.position = (
-                robot.body.position.x + behind_x * drop_distance,
+                robot.body.position.x + behind_x * (drop_distance),
                 robot.body.position.y + behind_y * drop_distance,
             )
-            picked_ball.body.velocity = (0, 0)
+            picked_ball.body.velocity = (behind_x * 100, behind_y * 100)  # Adjust the multiplier as needed
             picked_ball.body.angular_velocity = 0
             picked_ball.loader_level = -1.0
             self.body.space.add(picked_ball.body, picked_ball.shape)

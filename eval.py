@@ -1,2 +1,5 @@
 from evaluator.evaluator import Evaluator
-evaluator = Evaluator(checkpoint_path='checkpoints_0', n_games_per_matchup=16)
+
+if __name__ == "__main__":
+    evaluator = Evaluator(checkpoint_path='checkpoints_1', n_games_per_matchup=500, n_workers=10)
+    evaluator.run()

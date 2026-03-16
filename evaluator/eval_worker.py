@@ -1,15 +1,15 @@
 from config import VexConfig
-from eval.evaluator import Evaluator
 from model.mlp import MLP
 from env.env import VexEnv
 
 import torch 
-
+import time
 def eval_workers(
     worker_id: int,
-    evaluator: Evaluator,
+    evaluator,
     config: VexConfig,
 ):
+    time.sleep(worker_id * 0.01)
     torch.set_num_threads(1)
     env = VexEnv(config)
     model_1 = MLP(config)
@@ -43,10 +43,15 @@ def eval_workers(
                     legal_actions['robot_blue'].view(1, -1), # (1, n_primary_actions)
                     inference=True
                 )
-            env_out = env.step(out1['action'], out2['action'])
+            actions = {
+                'robot_red': out1['actions'][0].tolist(), # [discrete, x, y, theta]
+                'robot_blue': out2['actions'][0].tolist(),
+            }
+            env_out = env.step(actions)
             done, legal_actions, observations, rewards, timestep = \
                 env_out['done'], env_out['legal_actions'], env_out['observations'], env_out['rewards'], env_out['timestep']
         
-        red_won = rewards['robot_red'] > rewards['robot_blue']
-        blue_won = rewards['robot_blue'] > rewards['robot_red']        
+        red_won = env_out['score']['robot_red'] > env_out['score']['robot_blue']
+        blue_won = env_out['score']['robot_blue'] > env_out['score']['robot_red']   
+        evaluator.update_trueskill(idx1, idx2, red_won, blue_won)
     
