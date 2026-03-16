@@ -101,9 +101,13 @@ class VexEnv:
                 x_idx = action[player][1]
                 y_idx = action[player][2]
                 theta_idx = action[player][3]
-                delta_x = (x_idx - (self.main_config.N  + 1) / 2) * (2.0 * self.main_config.max_offset / (self.main_config.N - 1))
-                delta_y = (y_idx - (self.main_config.N  + 1) / 2) * (2.0 * self.main_config.max_offset / (self.main_config.N - 1))
-                delta_theta = (theta_idx - (self.main_config.K + 1) / 2) * (2.0 * math.pi / (self.main_config.K - 1))
+                translation_center = (self.main_config.N - 1) / 2
+                translation_scale  = 2.0 * self.main_config.max_offset / (self.main_config.N - 1)
+                delta_x = (x_idx - translation_center) * translation_scale
+                delta_y = (y_idx - translation_center) * translation_scale
+                rotation_center = (self.main_config.K - 1) / 2
+                rotation_scale = 2.0 * math.pi / (self.main_config.K - 1)
+                delta_theta = (theta_idx - rotation_center) * rotation_scale
                 target_x = robot.body.position.x + delta_x
                 target_y = robot.body.position.y + delta_y
                 target_theta = robot.body.angle + delta_theta

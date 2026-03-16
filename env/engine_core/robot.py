@@ -178,6 +178,7 @@ class Robot:
             self.body.velocity = (0, 0)
             self.body.angular_velocity = 0
             picked_ball.state = self.key
+            picked_ball.loader_level = -1.0
             self._set_ball_ghost(picked_ball, False)
             self.space.remove(picked_ball.shape, picked_ball.body)
             self.inventory.append(picked_ball)

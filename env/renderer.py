@@ -97,10 +97,9 @@ class EnvRenderer:
         red_inv = field_dict["red_robot"].inventory
         blue_inv = field_dict["blue_robot"].inventory
         red_red = sum(1 for ball in red_inv if getattr(ball, "colour", None) == "red")
-        red_blue = sum(1 for ball in red_inv if getattr(ball, "colour", None) == "blue")
-        blue_red = sum(1 for ball in blue_inv if getattr(ball, "colour", None) == "red")
         blue_blue = sum(1 for ball in blue_inv if getattr(ball, "colour", None) == "blue")
-
+        red_score = field_dict.get("red_score", 0)
+        blue_score = field_dict.get("blue_score", 0)
         loader_lines = []
         for loader_key in ("LD1", "LD2", "LD3", "LD4"):
             loader = field_dict.get(loader_key)
@@ -165,11 +164,10 @@ class EnvRenderer:
             ("", (30, 30, 30)),
             (f"Red: {len(red_inv)}", (220, 40, 40)),
             (f"  red balls:  {red_red}", (80, 80, 80)),
-            (f"  blue balls: {red_blue}", (80, 80, 80)),
             ("", (30, 30, 30)),
             (f"Blue: {len(blue_inv)}", (40, 80, 220)),
-            (f"  red balls:  {blue_red}", (80, 80, 80)),
             (f"  blue balls: {blue_blue}", (80, 80, 80)),
+            (f"Score: R {red_score} - B {blue_score}", (30, 30, 30)),
         ]
 
         if len(loader_lines) > 0:

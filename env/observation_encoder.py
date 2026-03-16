@@ -252,6 +252,7 @@ class ObservationEncoder:
             ball_obs_p2_idx.append(one_hot_idx)
             if ball_state == 'N/A' or ball_state == opp_robot.key:
                 x_norm, y_norm, dx_norm, dy_norm, dist_norm, heading_err_sin, heading_err_cos = (-2.0,) * 7 
+                loader_level = -1.0
             elif robot_key == "robot_blue":
                 x_norm, y_norm = 1 - x_norm, 1 - y_norm
                 dx_norm, dy_norm = -dx_norm, -dy_norm

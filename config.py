@@ -84,10 +84,12 @@ class VexConfig:
     save_ckpt_path: str = "checkpoints"
     n_save_learner_ckpts: int = 500
     n_save_all_ckpts: int = 50
+    start_with_pretrained: str = None # path to pretrained checkpoint 
 
     # LOADING CKPT
     load_ckpt_path: str | None = None
     resume_training: bool = False
+    
     
     def __post_init__(self):
         assert self.engine_hz >= self.inference_hz, "Engine update frequency should be higher than or equal to inference frequency"

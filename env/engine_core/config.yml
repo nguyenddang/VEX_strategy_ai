@@ -47,13 +47,13 @@ goal:
     angle: -45
     capacity: 7
   long_1:
-    position: [179.7504, 59.5376]
+    position: [178.3461, 59.5376]
     width: 123.925
     height: 14.053
     angle: 0
     capacity: 15
   long_2:
-    position: [179.7504, 297.1546]
+    position: [178.3461, 297.1546]
     width: 123.925
     height: 14.053
     angle: 0

@@ -1,7 +1,7 @@
 import pymunk
 import math
 from typing import Dict, Any, Optional, Tuple, List
-
+import random 
 from .utils import normalize_angle
 
 class Wall:
@@ -260,8 +260,8 @@ class Goal:
             out_dx = output_pos[0] - self.cache_pose['position'][0]
             out_dy = output_pos[1] - self.cache_pose['position'][1]
             out_dist = math.hypot(out_dx, out_dy)
-            out_x = out_dx / out_dist if out_dist > 1e-8 else math.cos(self.cache_pose['angle'])
-            out_y = out_dy / out_dist if out_dist > 1e-8 else math.sin(self.cache_pose['angle'])
+            out_x = out_dx / out_dist if out_dist > 1e-8 else math.cos(self.cache_pose['angle']) * random.uniform(0, 4)
+            out_y = out_dy / out_dist if out_dist > 1e-8 else math.sin(self.cache_pose['angle']) * random.uniform(0, 4)
             eject_distance = self.width / 2 + self.ball_config['radius'] * 1.25
             ejected_ball.body.position = (
                 self.cache_pose['position'][0] + out_x * eject_distance,
@@ -319,6 +319,7 @@ class Goal:
                     self.cache_pose['position'][1],
                 ),
             ]
+    
     def has_control_zone(self, robot_key: str):
         """Check Long goal control zone. 
         """
@@ -514,7 +515,7 @@ class Loader:
             picked_ball.loader_level = -1.0
             robot.inventory.append(picked_ball)
         else:
-            drop_distance = self.robot_config['size'] / 2 + self.ball_config['radius'] * 1.25
+            drop_distance = self.robot_config['size'] / 2 + self.ball_config['radius'] * 1.25 + random.uniform(0, 4)
             behind_x = -math.cos(robot.body.angle)
             behind_y = -math.sin(robot.body.angle)
             picked_ball.state = "ground"
