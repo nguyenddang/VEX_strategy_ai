@@ -6,7 +6,7 @@ from env.env import VexEnv
 
 from typing import Dict
 import time 
-from model.model import GeniusFormer
+from model.mlp import MLP
 
         
 def zeros_buffer(buffer: Dict[str, torch.Tensor]):
@@ -23,8 +23,8 @@ def worker_decentralized_fn(
     torch.set_num_threads(1)
     time.sleep(worker_id * 0.01) 
     env = VexEnv(config)
-    opponent_model = GeniusFormer(config)
-    learner_model = GeniusFormer(config)
+    opponent_model = MLP(config)
+    learner_model = MLP(config)
     learner_model.eval()
     opponent_model.eval() 
     worker_learner_version = league.learner_version.value
@@ -51,9 +51,6 @@ def worker_decentralized_fn(
             if league.learner_version.value != worker_learner_version:
                 torch.nn.utils.vector_to_parameters(league.learner_param, learner_model.parameters())
                 worker_learner_version = league.learner_version.value
-        # reset kv caches 
-        for m in [opponent_model, learner_model]:
-            m.reset_kv_cache()
         zeros_buffer(local_buffer)
         local_buffer['learner_versions'].fill_(worker_learner_version)
 
@@ -68,16 +65,16 @@ def worker_decentralized_fn(
             
             with torch.no_grad():
                 learner_out = learner_model(
-                    observations[learner_key]['core_obs'].view(1, 1, -1), # (1, 1, core_obs_dim)
-                    observations[learner_key]['ball_obs'].view(1, 1, config.n_balls, -1), # (1, 1, n_balls, ball_obs_dim)
+                    observations[learner_key]['core_obs'].view(1, -1), # (1, core_obs_dim)
+                    observations[learner_key]['ball_obs'].view(1, config.n_balls, -1), # (1, n_balls, ball_obs_dim)
                     legal_actions[learner_key].view(1, -1), # (1, n_primary_actions)
-                    do_inference=True
+                    inference=True
                 )
                 opponent_out = opponent_model(
-                    observations[opp_key]['core_obs'].view(1, 1, -1), # (1, 1, core_obs_dim)
-                    observations[opp_key]['ball_obs'].view(1, 1, config.n_balls, -1), # (1, 1, n_balls, ball_obs_dim)
+                    observations[opp_key]['core_obs'].view(1, -1), # (1, core_obs_dim)
+                    observations[opp_key]['ball_obs'].view(1, config.n_balls, -1), # (1, n_balls, ball_obs_dim)
                     legal_actions[opp_key].view(1, -1), # (1, n_primary_actions)
-                    do_inference=True
+                    inference=True
                 )
             # copy outputs to local buffer 
             local_buffer['actions'][timestep].copy_(learner_out['actions'][0])

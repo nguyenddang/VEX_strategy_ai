@@ -67,17 +67,13 @@ class VexConfig:
     value_coef: float = 1.0
     entropy_coef: float = 0.001
 
-    # TRANSFORMER
+    # MLP
     compile=True
-    n_embd: int = 128
-    n_layer: int = 4
-    action_size: int = 4
-    n_head: int = 4
-
+    n_embd: int = 256
     core_obs_dim: int = 85
     n_balls: int = 88
     ball_obs_dim: int = 29
-    total_timesteps: int = 100
+    total_timesteps: int = 600
 
     # LOGGING
     log_wandb: bool = False

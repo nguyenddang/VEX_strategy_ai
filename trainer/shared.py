@@ -1,12 +1,13 @@
 import torch 
+import torch.nn as nn
 import torch.multiprocessing as mp
 
 from config import VexConfig
 from typing import Dict
 
-from model.model import GeniusFormer
 import time
 import random 
+from model.mlp import MLP
 
 class SharedBuffer:
     def __init__(self, config: VexConfig):
@@ -71,7 +72,7 @@ class SharedLeague:
         self.latest_ratio = config.latest_ratio
         self.n_workers = config.n_workers
         
-        local_model = GeniusFormer(config)
+        local_model = MLP(config)
         total_params = sum(p.numel() for p in local_model.parameters())
         del local_model
         self.latest_opp_idx = mp.Value('i', -1) # index of the latest snapshot in the bank.
@@ -84,7 +85,7 @@ class SharedLeague:
         self.learner_version = mp.Value('i', -1)
         self.learner_lock = mp.Lock()
         
-    def update_latest_snapshot(self, model: GeniusFormer):
+    def update_latest_snapshot(self, model: nn.Module):
         # push newest snapshot into the bank. 
         # called by trainer gpu after each n (every config.steps_per_iteration) 
         param = torch.nn.utils.parameters_to_vector(model.parameters()).detach().cpu()
@@ -101,7 +102,7 @@ class SharedLeague:
             self.opp_bank[replace_idx].copy_(param)
             self.opp_just_updated[replace_idx] = True
             
-    def update_learner_param(self, model: GeniusFormer):
+    def update_learner_param(self, model: nn.Module):
         param = torch.nn.utils.parameters_to_vector(model.parameters()).detach().cpu()
         with self.learner_lock:
             self.learner_param.copy_(param)
@@ -139,7 +140,7 @@ class SharedLeague:
             "opp_just_updated": self.opp_just_updated.clone(),
         }
     
-    def load_state_dict(self, state_dict, learner: GeniusFormer):
+    def load_state_dict(self, state_dict, learner: nn.Module):
         with self.opp_lock:
             self.latest_opp_idx.value = state_dict["latest_opp_idx"]
             self.opp_bank.copy_(state_dict["opp_bank"])
