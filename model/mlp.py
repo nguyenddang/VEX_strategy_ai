@@ -17,7 +17,13 @@ class MLP(nn.Module):
             nn.GELU(),
             nn.LayerNorm(config.n_embd*2),
         )
-        self.head = nn.Linear(config.n_embd*2, config.n_primary_actions + config.N * 2 + config.K + 1)
+        self.policy_head = nn.Linear(config.n_embd*2, config.n_primary_actions + config.N * 2 + config.K)
+        self.value_head = nn.Sequential(
+            nn.Linear(config.n_embd*2, config.n_embd),
+            nn.GELU(),
+            nn.LayerNorm(config.n_embd),
+            nn.Linear(config.n_embd, 1)
+        )
         self.config = config
         print(f"MLP initialized with {sum(p.numel() for p in self.parameters())/1e6:.2f}M parameters.")
         
@@ -27,16 +33,16 @@ class MLP(nn.Module):
         # legal_masks: (B, n_primary_actions) 
         x = self.encoder(core_obs, ball_obs) # (B, n_embd)
         x = self.base(x)
-        policy_value_logits = self.head(x)
+        policy_logits = self.policy_head(x)
+        value_logits = self.value_head(x)
 
-        unmasked_primary_action_logits, x_bin_logits, y_bin_logits, theta_bin_logits, value_logits = \
+        unmasked_primary_action_logits, x_bin_logits, y_bin_logits, theta_bin_logits = \
             torch.split(
-                policy_value_logits, 
+                policy_logits, 
                 [self.config.n_primary_actions, 
                  self.config.N, 
                  self.config.N, 
-                 self.config.K, 
-                 1], dim=-1)
+                 self.config.K], dim=-1)
         primary_action_logits = unmasked_primary_action_logits.masked_fill(legal_masks == 0, float("-inf"))
         out = {
             "primary_action_logits": primary_action_logits, # (B, n_primary_actions)
