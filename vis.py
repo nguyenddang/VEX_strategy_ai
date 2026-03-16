@@ -3,34 +3,27 @@ from networkx import config
 import torch
 from config import VexConfig
 from env.env import VexEnv
-from model.model import GeniusFormer
+from model.mlp import MLP
 import time
 import math 
 def main():
 	# Load config and environment
-	checkpoint = torch.load("checkpoints/learner_1500.pt", map_location="cpu")
+	checkpoint_learner = torch.load("checkpoints/learner_2750.pt", map_location="cpu")
+	checkpoint_opp = torch.load("checkpoints/learner_2750.pt", map_location="cpu")
 	config = VexConfig()
-	config_dict = checkpoint['config']
+	config_dict = checkpoint_learner['config']
 	# load config values from checkpoint
 	for key, value in config_dict.items():
 		setattr(config, key, value)
 	config.render_mode = 'human'
-	config.loader_pickup_hitbox = {
-		'dist_threshold': 35, # cm
-		'angle_threshold': math.radians(45),
-	}
-	config.goal_action_hitbox = {
-		'dist_threshold': 25,
-		'angle_threshold': math.radians(45),
-	}
-	config.ball_pickup_hitbox = {
-		'dist_threshold': 25, # cm
-		'angle_threshold': math.radians(45),
-	}
+	config.realtime_render = False
 	env = VexEnv(config)
-	model = GeniusFormer(config)
-	model.load_state_dict(checkpoint['model'])
-	model.eval()
+	learner = MLP(config)
+	learner.load_state_dict(checkpoint_learner['model'])
+	learner.eval()
+	opp = MLP(config)
+	opp.load_state_dict(checkpoint_opp['model'])
+	opp.eval()
 
 	obs = env.reset()
 	done = obs.get('done', False)
@@ -43,12 +36,13 @@ def main():
 		# Prepare input tensors for both robots
 		actions = {}
 		for robot_key in ['robot_red', 'robot_blue']:
-			core_obs = obs_dict[robot_key]['core_obs'].unsqueeze(0).unsqueeze(0)  # (B=1, T=1, core_obs_dim)
-			ball_obs = obs_dict[robot_key]['ball_obs'].unsqueeze(0).unsqueeze(0)  # (B=1, T=1, n_balls, ball_obs_dim)
-			legal_mask = legal_actions[robot_key].unsqueeze(0)  # (B=1, T=1, n_primary_actions)
+			core_obs = obs_dict[robot_key]['core_obs'].view(1, -1)
+			ball_obs = obs_dict[robot_key]['ball_obs'].view(1, config.n_balls, -1)  # (B=1, T=1, n_balls, ball_obs_dim)
+			legal_mask = legal_actions[robot_key].view(1, -1)  # (B=1, T=1, n_primary_actions)
 			with torch.no_grad():
-				out = model(core_obs, ball_obs, legal_mask, do_inference=True)
-				act = out['actions'][0, :].cpu().numpy().tolist()  # [discrete, x, y, theta]
+				model = learner if robot_key == 'robot_red' else opp
+				out = model(core_obs, ball_obs, legal_mask, inference=True)
+				act = out['actions'][0, :].tolist()  # [discrete, x, y, theta]
 			actions[robot_key] = act
 
 		obs = env.step(actions)
