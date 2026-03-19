@@ -25,8 +25,8 @@ class SharedBuffer:
             'move_masks': torch.zeros((self.buffer_capacity, self.max_actions), dtype=torch.bool).share_memory_(),
             'log_probs': torch.zeros((self.buffer_capacity, self.max_actions), dtype=torch.float32).share_memory_(),
             'learner_versions': torch.zeros((self.buffer_capacity, 1), dtype=torch.float32).share_memory_(), 
-            'red_score': torch.zeros((self.buffer_capacity, 1), dtype=torch.float32).share_memory_(),
-            'blue_score': torch.zeros((self.buffer_capacity, 1), dtype=torch.float32).share_memory_(),
+            'learner_score': torch.zeros((self.buffer_capacity, 1), dtype=torch.float32).share_memory_(),
+            'opp_score': torch.zeros((self.buffer_capacity, 1), dtype=torch.float32).share_memory_(),
         }
         
         self.read_write_queue = mp.Queue() # worker pull from queue to write, trainer gpu pull from queue to read. ensures no overlapping write/read.
@@ -60,7 +60,7 @@ class SharedBuffer:
             idx = self.read_write_queue.get() # block until enough chunks are ready.
             ids.append(idx)
         for key in self.buffer:
-            batch[key] = self.buffer[key][ids]
+            batch[key] = self.buffer[key][ids].clone()
         for idx in ids:
             self.read_write_queue.put(idx)
         return batch
@@ -133,21 +133,24 @@ class SharedLeague:
                 self.opp_qualities[opponent_idx] -= delta
 
     def state_dict(self):
-        return {
-            "latest_opp_idx": self.latest_opp_idx.value,
-            "opp_bank": self.opp_bank.clone(),
-            "opp_qualities": self.opp_qualities.clone(),
-            "opp_just_updated": self.opp_just_updated.clone(),
-        }
+        with self.opp_lock:
+            with self.learner_lock:
+                return {
+                    "latest_opp_idx": self.latest_opp_idx.value,
+                    "opp_bank": self.opp_bank.clone(),
+                    "opp_qualities": self.opp_qualities.clone(),
+                    "opp_just_updated": self.opp_just_updated.clone(),
+                    "learner_value": self.learner_version.value,
+                    "learner_param": self.learner_param.clone(),
+                }
     
-    def load_state_dict(self, state_dict, learner: nn.Module):
+    def load_state_dict(self, state_dict):
         with self.opp_lock:
             self.latest_opp_idx.value = state_dict["latest_opp_idx"]
             self.opp_bank.copy_(state_dict["opp_bank"])
             self.opp_qualities.copy_(state_dict["opp_qualities"])
             self.opp_just_updated.copy_(state_dict["opp_just_updated"])
         with self.learner_lock:
-            param = torch.nn.utils.parameters_to_vector(learner.parameters()).detach().cpu()
-            self.learner_param.copy_(param)
-            self.learner_version.value = state_dict["iteration"]
-            
+            self.learner_param.copy_(state_dict["learner_param"])
+            self.learner_version.value = state_dict["learner_value"]
+            print(f"Loaded learner version {self.learner_version.value} from checkpoint.")

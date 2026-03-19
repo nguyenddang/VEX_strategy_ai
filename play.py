@@ -31,4 +31,5 @@
 
 import torch
 name = torch.cuda.get_device_name(0)
-print(f"Using device: {name.split(' ')[-1] == 'H200'}")
+print(name)
+print(f"Cuda available: {torch.cuda.is_available()}")

@@ -6,6 +6,9 @@ from model.mlp import MLP
 from trainer.shared import SharedBuffer, SharedLeague
 from trainer.worker import worker_decentralized_fn
 
+from evaluator.evaluator import TrainEvaluator
+from evaluator.eval_worker import eval_workers
+
 from torch.distributions import Categorical
 import torch.nn.functional as F
 import torch.multiprocessing as mp
@@ -33,7 +36,6 @@ class Trainer:
         self.mini_train_episodes = config.mini_train_episodes
         self.max_actions = config.max_actions
         self.total_timesteps = config.total_timesteps
-        self.block_size = config.block_size
         self.grad_accumulation_steps = int(self.train_episodes // config.mini_train_episodes)
         # gae config
         self.gamma = config.gamma
@@ -45,22 +47,23 @@ class Trainer:
         self.value_coef = config.value_coef
 
         # init model, shared buffer, league, and inference server.
-        self.unoptimzed_learner = None
         self.learner = MLP(config)
         self.learner.train()
         self.buffer = SharedBuffer(config)
         self.league = SharedLeague(config)
+        self.evaluator = TrainEvaluator(config, self.league)
 
         # init optimizer
         self.optimizer = torch.optim.AdamW(self.learner.parameters(), lr=config.lr)
-
+        self.learner.to(self.train_device)
         if config.resume_training:
+            print(f"Resuming training from checkpoint: {config.load_ckpt_path}", flush=True)
             ckpt = torch.load(config.load_ckpt_path)
             self.load_state_dict(ckpt)
         else:
-            self.league.update_learner_param(self.learner)
+            print("Starting training from scratch.", flush=True)
             self.league.update_latest_snapshot(self.learner)
-        
+            self.league.update_learner_param(self.learner)
         # misc
         self.last_produced = 0
 
@@ -71,11 +74,14 @@ class Trainer:
             p = mp.Process(target=worker_decentralized_fn, args=(worker_id, self.buffer, self.league, config))
             p.start()
             self.processes.append(p)
+            
+        for eval_worker_id in range(config.n_eval_workers):
+            p = mp.Process(target=eval_workers, args=(eval_worker_id, self.evaluator, config))
+            p.start()
+            self.processes.append(p)
         
-        self.learner.to(self.train_device)
         if config.compile:
             print("Compiling model...", flush=True)
-            self.unoptimzed_learner = self.learner
             self.learner = torch.compile(self.learner)
         print(f"Gradient accumulation steps: {self.grad_accumulation_steps}", flush=True)
 
@@ -122,14 +128,14 @@ class Trainer:
             "grad_norm": 0.0,
             "adv_mean": 0.0,
             "adv_std": 0.0,
-            "red_reward": 0.0,
-            "red_score": 0.0,
-            "blue_score": 0.0,
+            "learner_score": 0.0,
+            "opp_score": 0.0,
             'action_percentage': torch.zeros((self.n_primary_actions,), dtype=torch.float32),
         }
         denom = self.steps_per_iteration * self.grad_accumulation_steps
         for step in range(self.steps_per_iteration):
             for g_step in range(self.grad_accumulation_steps):
+                time.sleep(0.05) # wait for buffer to be filled
                 batch = self.buffer.pull_from_buffer()
                 core_obs = batch['core_obs'].pin_memory().to(self.train_device, non_blocking=True).view(-1, self.core_obs_dim) # B * total_timesteps, core_obs_dim
                 ball_obs = batch['ball_obs'].pin_memory().to(self.train_device, non_blocking=True).view(-1, self.n_balls, self.ball_obs_dim) # B * total_timesteps, n_balls, ball_obs_dim
@@ -140,8 +146,8 @@ class Trainer:
                 move_masks = batch['move_masks'].pin_memory().to(self.train_device, non_blocking=True).view(-1) # B * 2 * total_timesteps
                 log_probs = batch['log_probs'].pin_memory().to(self.train_device, non_blocking=True).view(-1) # B * 2 * total_timesteps
                 accum_learner_versions += batch['learner_versions'].mean().item()
-                red_score = batch['red_score'].mean().item()
-                blue_score = batch['blue_score'].mean().item()
+                learner_score = batch['learner_score'].mean().item()
+                opp_score = batch['opp_score'].mean().item()
 
                 with torch.no_grad():
                     advantages = self._get_advantage(rewards, values) # B, total_timesteps
@@ -174,10 +180,11 @@ class Trainer:
                 iteration_batch['entropy_bonus'] += entropy_bonus.item() / denom
                 iteration_batch['adv_mean'] += adv_mean.item() / denom
                 iteration_batch['adv_std'] += adv_std.item() / denom
-                iteration_batch['red_score'] += red_score / denom
-                iteration_batch['blue_score'] += blue_score / denom
+                iteration_batch['learner_score'] += learner_score / denom
+                iteration_batch['opp_score'] += opp_score / denom
                 iteration_batch['action_percentage'] += torch.bincount(actions[:, 0].cpu(), minlength=self.n_primary_actions).float() / (actions.shape[0] * denom)
             norm = torch.nn.utils.clip_grad_norm_(self.learner.parameters(), max_norm=1.0)
+            iteration_batch['grad_norm'] += norm.item() / self.steps_per_iteration
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
             print(f"Step {step}: Loss {(self.grad_accumulation_steps * loss).item():.4f}, \
@@ -187,8 +194,8 @@ Entropy Bonus {entropy_bonus.item():.4f}, \
 Grad Norm {norm:.4f}, \
 Adv Mean {adv_mean.item():.4f}, \
 Adv Std {adv_std.item():.4f}, \
-Red Score {red_score:.4f} \
-Blue Score {blue_score:.4f}", flush=True)
+Learner Score {learner_score:.4f} \
+Opponent Score {opp_score:.4f}", flush=True)
         return accum_learner_versions / (self.steps_per_iteration * self.grad_accumulation_steps), iteration_batch
 
 
@@ -197,22 +204,22 @@ Blue Score {blue_score:.4f}", flush=True)
             while True:
                 print(f"Starting iteration {self.iteration}", flush=True)
                 start_time = time.time()
-
                 M = float(self.iteration)
                 N, iteration_batch = self._train_iteration()
 
-                self.league.update_learner_param(self.learner if self.unoptimzed_learner is None else self.unoptimzed_learner)
+                self.league.update_learner_param(self.learner)
+                self.evaluator.update_learner_param(self.learner, self.iteration + 1)
                 if self.iteration % self.update_league == 0 and self.iteration > 0:
                     print(f"Updating league at iteration {self.iteration}", flush=True)
-                    self.league.update_latest_snapshot(self.learner if self.unoptimzed_learner is None else self.unoptimzed_learner)
-
+                    self.league.update_latest_snapshot(self.learner)
                 # torch.cuda.synchronize()
                 end_time = time.time()
                 
                 dt = end_time - start_time
                 sample_reuse_batch = self.get_sample_reuse(dt, self.iteration)
                 print(f"[TRAINER] Iteration: {self.iteration}, Staleness: {(M-N):.2f}, Optimizing Version: {M:.2f}, Average Learner Version in Batch: {N:.2f}", flush=True)
-
+                with self.evaluator.lock:
+                    print(f"[TRAINER] Current TrueSkill of Learner: {self.evaluator.test_mu.value:.2f} ± {self.evaluator.test_sigma.value:.2f}, Evaluated Version: {self.evaluator.test_version.value} Games Played: {self.evaluator.test_n.value}", flush=True)
                 # logging
                 if self.log_wandb:
                     iteration_batch['move%'] = iteration_batch['action_percentage'][0].item()
@@ -220,9 +227,15 @@ Blue Score {blue_score:.4f}", flush=True)
                     iteration_batch['pick_ground%'] = iteration_batch['action_percentage'][2].item()
                     iteration_batch['score%'] = iteration_batch['action_percentage'][3].item()
                     iteration_batch['block%'] = iteration_batch['action_percentage'][4].item()
+                    with self.evaluator.lock:
+                        iteration_batch['trueskill'] = self.evaluator.test_mu.value
+                        iteration_batch['trueskill_sigma'] = self.evaluator.test_sigma.value
+                        iteration_batch['trueskill_v'] = self.evaluator.test_version.value
                     del iteration_batch['action_percentage']
                     wandb.log(iteration_batch | sample_reuse_batch | {"staleness": (M-N), "optimizing_version": M, "average_learner_version_in_batch": N}, step=self.iteration)
 
+
+                self.iteration += 1
                 # saving ckpts
                 if self.iteration > 0 and (self.iteration % self.n_save_learner_ckpts) == 0:
                     learner_ckpt_path = f"{self.save_ckpt_path}/learner_{self.iteration}.pt"
@@ -233,7 +246,7 @@ Blue Score {blue_score:.4f}", flush=True)
                     torch.save(self.state_dict(self.iteration), all_ckpt_path)
                     print(f"Saved full checkpoint at iteration {self.iteration} to {all_ckpt_path}", flush=True)
                 
-                self.iteration += 1
+                
 
         except KeyboardInterrupt:
             print("KeyboardInterrupt received. Stopping training loop...", flush=True)
@@ -250,7 +263,7 @@ Blue Score {blue_score:.4f}", flush=True)
     
     def state_dict_learner(self, iteration):
         return {
-            'model': self.learner.state_dict() if self.unoptimzed_learner is None else self.unoptimzed_learner.state_dict(),
+            'model': self.learner.state_dict(),
             'optim': self.optimizer.state_dict(),
             'iteration': iteration,
             'config': self.config.__dict__
@@ -259,26 +272,22 @@ Blue Score {blue_score:.4f}", flush=True)
     def state_dict(self, iteration):
         learner = self.state_dict_learner(iteration)
         league = self.league.state_dict()
-        return learner | league
+        evaluator = self.evaluator.state_dict()
+        return learner | league | evaluator
     
     def load_state_dict_learner(self, state_dict):
+        unwanted_prefix = '_orig_mod.'
+        for k,v in list(state_dict['model'].items()):
+            if k.startswith(unwanted_prefix):
+                state_dict['model'][k[len(unwanted_prefix):]] = state_dict['model'].pop(k)
         self.learner.load_state_dict(state_dict['model'])
         self.optimizer.load_state_dict(state_dict['optim'])
         self.iteration = state_dict['iteration']
-
-        # need to move optimizer states to the correct device (torch did it the lazy way)
-        for state in self.optimizer.state.values():
-            for key, value in state.items():
-                if isinstance(value, torch.Tensor):
-                    state[key] = value.to(self.train_device, non_blocking=True)
     
     def load_state_dict(self, state_dict):
         self.load_state_dict_learner(state_dict)
-        self.league.load_state_dict(state_dict, self.learner)
-    
-    def load_state_dict(self, state_dict):
-        self.load_state_dict_learner(state_dict)
-        self.league.load_state_dict(state_dict, self.learner)
+        self.league.load_state_dict(state_dict)
+        self.evaluator.load_state_dict(state_dict)
 
     def get_sample_reuse(self, dt, iteration):
         with self.buffer.sample_produced.get_lock():

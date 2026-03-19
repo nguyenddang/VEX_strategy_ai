@@ -195,12 +195,12 @@ class VexEnv:
                 reward_red += 5.0
                 score_diff = post_red_score - post_blue_score
                 # bonus for winning by larger margin
-                reward_red += 0.01 * score_diff
+                reward_red += 0.05 * score_diff
             elif post_blue_score > post_red_score:
                 reward_blue += 5.0
                 score_diff = post_blue_score - post_red_score
                 # bonus for winning by larger margin
-                reward_blue += 0.01 * score_diff
+                reward_blue += 0.05 * score_diff
 
         temp = reward_red
         reward_red = reward_red - reward_blue

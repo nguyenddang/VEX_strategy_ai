@@ -91,6 +91,16 @@ def reset_world(space: pymunk.Space, field: Field, engine_config: Dict[str, Any]
     """
     all_balls = []
     balls = field.balls
+    for colour in ['red', 'blue']:
+        for position in engine_config['initial_ground_ball_positions'][colour]:
+            ball = balls.pop(0)
+            ball.body.position = position
+            ball.state = "ground"
+            ball.colour = colour
+            ball.loader_level = -1.0
+            if ball.shape not in space.shapes:
+                space.add(ball.shape, ball.body)
+            all_balls.append(ball)
     for robot in [field.robot_red, field.robot_blue]:
         robot.body.velocity = (0, 0)
         robot.body.angular_velocity = 0
@@ -108,25 +118,6 @@ def reset_world(space: pymunk.Space, field: Field, engine_config: Dict[str, Any]
                 space.remove(ball.shape, ball.body)
             robot.inventory.append(ball)
             all_balls.append(ball)
-        
-    for goal in field.goals:
-        goal.scored_balls = [None] * goal.capacity
-        goal.relative_stats = {}
-        
-    for loader in field.loaders:
-        loader.relative_stats = {}
-        loader.scored_balls.clear()
-        for i in range(loader.capacity):
-            ball = balls.pop(0)
-            ball.body.position = engine_config['loader'][loader.key]['position']
-            ball.state = loader.key
-            ball.colour = engine_config['loader'][loader.key]['preload'][i]
-            ball.loader_level = i / (loader.capacity -  1)
-            if ball.shape in space.shapes:
-                space.remove(ball.shape, ball.body)
-            loader.scored_balls.append(ball)
-            all_balls.append(ball)
-            
     for loader in [field.loaders[0], field.loaders[3]]:
         loader.manager.inventory.clear()
         loader.manager.left_to_load = 12 
@@ -140,17 +131,22 @@ def reset_world(space: pymunk.Space, field: Field, engine_config: Dict[str, Any]
                 space.remove(ball.shape, ball.body)
             loader.manager.inventory.append(ball)
             all_balls.append(ball)
-    
-    for colour in ['red', 'blue']:
-        for position in engine_config['initial_ground_ball_positions'][colour]:
+    for loader in field.loaders:
+        loader.relative_stats = {}
+        loader.scored_balls.clear()
+        for i in range(loader.capacity):
             ball = balls.pop(0)
-            ball.body.position = position
-            ball.state = "ground"
-            ball.colour = colour
-            loader.level = -1.0
-            if ball.shape not in space.shapes:
-                space.add(ball.shape, ball.body)
+            ball.body.position = engine_config['loader'][loader.key]['position']
+            ball.state = loader.key
+            ball.colour = engine_config['loader'][loader.key]['preload'][i]
+            ball.loader_level = i / (loader.capacity -  1)
+            if ball.shape in space.shapes:
+                space.remove(ball.shape, ball.body)
+            loader.scored_balls.append(ball)
             all_balls.append(ball)
+    for goal in field.goals:
+        goal.scored_balls = [None] * goal.capacity
+        goal.relative_stats = {}
     field.balls = all_balls
     field.actions_counter = 0
     return field

@@ -10,16 +10,18 @@ class MLP(nn.Module):
         super().__init__()
         self.encoder  = Encoder(config)
         self.base = nn.Sequential(
-            nn.Linear(config.n_embd, config.n_embd*2),
+            nn.Linear(config.n_embd, config.n_embd),
             nn.GELU(),
-            nn.LayerNorm(config.n_embd*2),
-            nn.Linear(config.n_embd*2, config.n_embd*2),
+            nn.Linear(config.n_embd, config.n_embd),
             nn.GELU(),
-            nn.LayerNorm(config.n_embd*2),
+            nn.Linear(config.n_embd, config.n_embd),
+            nn.GELU(),
+            nn.Linear(config.n_embd, config.n_embd),
+            nn.LayerNorm(config.n_embd),
         )
-        self.policy_head = nn.Linear(config.n_embd*2, config.n_primary_actions + config.N * 2 + config.K)
+        self.policy_head = nn.Linear(config.n_embd, config.n_primary_actions + config.N * 2 + config.K)
         self.value_head = nn.Sequential(
-            nn.Linear(config.n_embd*2, config.n_embd),
+            nn.Linear(config.n_embd, config.n_embd),
             nn.GELU(),
             nn.Linear(config.n_embd, config.n_embd//2),
             nn.GELU(),

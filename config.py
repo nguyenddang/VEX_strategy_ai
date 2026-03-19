@@ -39,11 +39,7 @@ class VexConfig:
         }
     ) # robot can pick up loader if satisfy distance and angle thesholds.
     n_primary_actions: int = 5
-    
-    # AGENT Config
-    ndim: int = 128 
-    block_size: int = 32
-    
+        
     # TRAINER
     n_workers: int = 56
     buffer_capacity: int = 128 
@@ -89,6 +85,11 @@ class VexConfig:
     # LOADING CKPT
     load_ckpt_path: str | None = None
     resume_training: bool = False
+    
+    # Evaluation
+    evaluator_capacity: int = 100 # 100 reference agents. 
+    n_games_per_pair: int = 100 
+    n_eval_workers: int = 5
     
     
     def __post_init__(self):

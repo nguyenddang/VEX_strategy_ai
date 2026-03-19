@@ -27,7 +27,7 @@ def worker_decentralized_fn(
     learner_model = MLP(config)
     learner_model.eval()
     opponent_model.eval() 
-    worker_learner_version = league.learner_version.value
+    worker_learner_version = -1
     local_buffer = {
         'core_obs': torch.zeros((config.max_actions, config.core_obs_dim), dtype=torch.float32),
         'ball_obs': torch.zeros((config.max_actions, config.n_balls, config.ball_obs_dim), dtype=torch.float32),
@@ -38,11 +38,12 @@ def worker_decentralized_fn(
         'move_masks': torch.zeros((config.max_actions,), dtype=torch.bool),
         'log_probs': torch.zeros((config.max_actions,), dtype=torch.float32),
         'learner_versions': torch.zeros((1,), dtype=torch.float32),
-        'red_score': torch.zeros((1,), dtype=torch.float32),
-        'blue_score': torch.zeros((1,), dtype=torch.float32),
+        'learner_score': torch.zeros((1,), dtype=torch.float32),
+        'opp_score': torch.zeros((1,), dtype=torch.float32),
     }
     print(f"Worker {worker_id} started.", flush=True)
-    learner_key, opp_key = 'robot_red', 'robot_blue'
+    learner_key = 'robot_red' if worker_id % 2 == 0 else 'robot_blue'
+    opp_key = 'robot_blue' if learner_key == 'robot_red' else 'robot_red'
     while True:
         opp_idx, p, n, param = league.sample_opponent(worker_id)
         # load opponent and learner parameters
@@ -53,7 +54,6 @@ def worker_decentralized_fn(
                 worker_learner_version = league.learner_version.value
         zeros_buffer(local_buffer)
         local_buffer['learner_versions'].fill_(worker_learner_version)
-
         env_out = env.reset()
         done, legal_actions, observations, rewards, timestep = \
             env_out['done'], env_out['legal_actions'], env_out['observations'], env_out['rewards'], env_out['timestep']
@@ -83,21 +83,21 @@ def worker_decentralized_fn(
             local_buffer['log_probs'][timestep].copy_(learner_out['log_prob'][0])
             
             act = {
-                'robot_red': learner_out['actions'][0].tolist(),
-                'robot_blue': opponent_out['actions'][0].tolist(),
+                learner_key: learner_out['actions'][0].tolist(),
+                opp_key: opponent_out['actions'][0].tolist(),
             }
             env_out = env.step(act)
             # save reward
-            local_buffer['rewards'][timestep] = env_out['rewards']['robot_red']
+            local_buffer['rewards'][timestep] = env_out['rewards'][learner_key]
 
             done, legal_actions, observations, rewards, timestep = \
                 env_out['done'], env_out['legal_actions'], env_out['observations'], env_out['rewards'], env_out['timestep']
 
-        local_buffer['red_score'][0] = env_out['score']['robot_red']
-        local_buffer['blue_score'][0] = env_out['score']['robot_blue']
+        local_buffer['learner_score'][0] = env_out['score'][learner_key]
+        local_buffer['opp_score'][0] = env_out['score'][opp_key]
 
         delta = 0.01/(n * p)
-        red_won = env_out['score']['robot_red'] > env_out['score']['robot_blue']
-        if red_won:
+        learner_won = env_out['score'][learner_key] > env_out['score'][opp_key]
+        if learner_won:
             league.update_quality(opp_idx, delta)
         buffer.push_to_buffer(local_buffer)

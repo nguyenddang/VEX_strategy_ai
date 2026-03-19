@@ -10,18 +10,21 @@ if __name__ == "__main__":
     torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
     config = VexConfig()
     config.train_device = "cuda:0"
-    config.n_workers = 116
+    config.n_workers = 88
     config.buffer_capacity = 200
-    config.train_episodes = 96
+    config.train_episodes = 16
     config.n_embd = 256
     config.n_save_learner_ckpts = 250
     config.n_save_all_ckpts = 25
     config.log_wandb = True
-    config.mini_train_episodes = 24 
-    config.steps_per_iteration = 16
-    config.update_league = 5
-    config.save_ckpt_path = "checkpoints_1"
+    config.mini_train_episodes = 16 
+    config.steps_per_iteration = 32
+    config.update_league = 10
+    config.save_ckpt_path = "checkpoints_3"
     config.compile = True 
+    config.load_ckpt_path = 'checkpoints_3/all.pt'
+    config.resume_training = False 
+    config.n_eval_workers = 5
     print(f"Using device: {torch.cuda.get_device_name(0)}")
     os.makedirs(config.save_ckpt_path, exist_ok=True)
     trainer = Trainer(config)
