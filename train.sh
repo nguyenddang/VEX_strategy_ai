@@ -4,7 +4,7 @@
 #SBATCH --mem=96g             # 
 #SBATCH -J "RL VEX"   # 
 #SBATCH -p short               # 
-#SBATCH -t 23:00:00            # 
+#SBATCH -t 23:59:00            # 
 #SBATCH --gres=gpu:1           # 
 #SBATCH -C "RTX6000B"              #
 
