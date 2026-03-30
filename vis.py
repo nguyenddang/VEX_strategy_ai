@@ -8,47 +8,62 @@ import time
 import math 
 def main():
 	# Load config and environment
-	checkpoint_learner = torch.load("checkpoints/learner_2750.pt", map_location="cpu")
-	checkpoint_opp = torch.load("checkpoints/learner_2750.pt", map_location="cpu")
+	checkpoint_learner = torch.load("checkpoints_7/learner_18750.pt", map_location="cpu")
+	checkpoint_opp = torch.load("checkpoints_7/learner_16500.pt", map_location="cpu")
 	config = VexConfig()
 	config_dict = checkpoint_learner['config']
 	# load config values from checkpoint
 	for key, value in config_dict.items():
 		setattr(config, key, value)
-	config.render_mode = 'human'
+	config.window_height = 1000
+	config.window_width = 1000
+	config.render_mode = None
 	config.realtime_render = False
 	env = VexEnv(config)
 	learner = MLP(config)
+	m, n, = 0.0, 0.0
+	t = 0.0
+	unwanted_prefix = '_orig_mod.'
+	for k,v in list(checkpoint_learner['model'].items()):
+		if k.startswith(unwanted_prefix):
+			checkpoint_learner['model'][k[len(unwanted_prefix):]] = checkpoint_learner['model'].pop(k)
+	for k,v in list(checkpoint_opp['model'].items()):
+		if k.startswith(unwanted_prefix):
+			checkpoint_opp['model'][k[len(unwanted_prefix):]] = checkpoint_opp['model'].pop(k)
 	learner.load_state_dict(checkpoint_learner['model'])
 	learner.eval()
 	opp = MLP(config)
 	opp.load_state_dict(checkpoint_opp['model'])
 	opp.eval()
 
-	obs = env.reset()
-	done = obs.get('done', False)
-	timestep = 0
+	env_out = env.reset()
+	done = env_out.get('done', False)
 	while not done:
 		# Use model for inference
-		obs_dict = obs['observations']
-		legal_actions = obs['legal_actions']
+		obs_dict = env_out['observations']
+		legal_actions = env_out['legal_actions']
 
 		# Prepare input tensors for both robots
 		actions = {}
-		for robot_key in ['robot_red', 'robot_blue']:
-			core_obs = obs_dict[robot_key]['core_obs'].view(1, -1)
-			ball_obs = obs_dict[robot_key]['ball_obs'].view(1, config.n_balls, -1)  # (B=1, T=1, n_balls, ball_obs_dim)
-			legal_mask = legal_actions[robot_key].view(1, -1)  # (B=1, T=1, n_primary_actions)
-			with torch.no_grad():
-				model = learner if robot_key == 'robot_red' else opp
-				out = model(core_obs, ball_obs, legal_mask, inference=True)
-				act = out['actions'][0, :].tolist()  # [discrete, x, y, theta]
-			actions[robot_key] = act
-
-		obs = env.step(actions)
-		done = obs.get('done', False)
-		timestep += 1
-		time.sleep(1.0 / config.render_hz)
+		learner_out = learner(obs_dict['robot_red']['core_obs'].view(1, -1), 
+							obs_dict['robot_red']['ball_obs'].view(1, config.n_balls, -1), 
+							legal_actions['robot_red'].view(1, -1), inference=True, argmax=False)
+		opp_out = opp(obs_dict['robot_blue']['core_obs'].view(1, -1), 
+						obs_dict['robot_blue']['ball_obs'].view(1, config.n_balls, -1), 
+						legal_actions['robot_blue'].view(1, -1), inference=True, argmax=False)
+		actions = {
+			'robot_red': learner_out['actions'][0, :].clone().tolist(),  # [discrete, x, y, theta]
+			'robot_blue': opp_out['actions'][0, :].clone().tolist()  # [discrete, x, y, theta]
+		}
+		if actions['robot_red'][0] == 0:
+			n += 1
+		if actions['robot_red'][0] != 0: 
+			m += 1
+			t += n
+			n = 0.0
+		env_out = env.step(actions)
+		done = env_out.get('done', False)
+	print(f"{'move': m, 'total': t, 'avg': t/m if m > 0 else 0.0}")
 
 	env.close()
 

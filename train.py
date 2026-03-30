@@ -20,9 +20,9 @@ if __name__ == "__main__":
     config.mini_train_episodes = 16 
     config.steps_per_iteration = 32
     config.update_league = 10
-    config.save_ckpt_path = "checkpoints_7"
+    config.save_ckpt_path = "checkpoints_9"
     config.compile = True 
-    config.load_ckpt_path = 'checkpoints_6/all.pt'
+    config.load_ckpt_path = 'checkpoints_8/all.pt'
     config.resume_training = True 
     config.n_eval_workers = 5
     print(f"Using device: {torch.cuda.get_device_name(0)}")
