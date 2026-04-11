@@ -74,3 +74,6 @@ The default config require 96 CPU cores and 1 GPU.
 Woah!
 ![Trueskill Plot](assets/trueskill_plot.png)
 ![Simulation Demo](assets/render.gif)
+
+# Authors
+Nguyen (Luca) Dang and Elene Kajaia
